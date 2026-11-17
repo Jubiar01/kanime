@@ -1,0 +1,49 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Android: installDebug",
+      "type": "shell",
+      "command": ".\\gradlew.bat",
+      "args": [
+        "installDebug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "JAVA_HOME": "C:\\Program Files\\Microsoft\\jdk-17.0.19.10-hotspot"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Android: launch app",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\.vscode\\launch-app.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Android: installDebug and launch",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Android: installDebug",
+        "Android: launch app"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}

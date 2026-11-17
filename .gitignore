@@ -1,0 +1,22 @@
+*.iml
+.gradle/
+.kotlin/
+.ltm/
+/local.properties
+local.properties
+/.idea
+.DS_Store
+/build
+**/build/
+/captures
+.externalNativeBuild
+.cxx
+
+# Private plugin module (excluded from public repo)
+/kanikoto-plugin/
+kanikoto-plugin/
+
+# Signing keys & credentials (keep private!)
+*.jks
+*.keystore
+app/info.txt
