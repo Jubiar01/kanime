@@ -3,11 +3,13 @@ package com.kanime.app.ui.screens
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -42,12 +44,31 @@ import com.kanime.app.data.model.MalLink
 import com.kanime.app.data.model.MalRecommendation
 import com.kanime.app.data.model.MalTheme
 import com.kanime.app.data.model.MalVideo
+import com.kanime.app.data.plugin.AnimeSourcePlugin
 import com.kanime.app.data.plugin.PluginBridge
 import com.kanime.app.data.plugin.PluginManager
 import com.kanime.app.ui.components.EpisodeCard
 import com.kanime.app.ui.viewmodel.AnimeUiState
 import com.kanime.app.ui.viewmodel.AnimeViewModel
 import kotlinx.coroutines.launch
+
+private sealed interface SourceAvailabilityState {
+    data class Checking(val pluginName: String) : SourceAvailabilityState
+    data class Available(val pluginName: String, val episodeCount: Int) : SourceAvailabilityState
+    data class Unavailable(
+        val pluginName: String,
+        val reason: String,
+        val verifiedAlternatives: List<AnimeSourcePlugin> = emptyList(),
+        val otherInstalledPlugins: List<AnimeSourcePlugin> = emptyList()
+    ) : SourceAvailabilityState
+    data class NoActivePlugin(val message: String) : SourceAvailabilityState
+}
+
+private data class CachedPluginLookup(
+    val episodes: List<Episode>?,
+    val availability: SourceAvailabilityState,
+    val checkedTitles: Set<String>
+)
 
 private fun openExternalUrl(context: Context, url: String) {
     try {
@@ -71,62 +92,190 @@ fun DetailScreen(
     val isInWatchlist = uiState.watchlistIds.contains(anime.id)
     val coroutineScope = rememberCoroutineScope()
 
-    var anikotoEpisodes by remember(anime.id) { mutableStateOf<List<Episode>?>(null) }
+    var pluginEpisodes by remember(anime.id) { mutableStateOf<List<Episode>?>(null) }
     var isLoadingPluginEpisodes by remember(anime.id) { mutableStateOf(false) }
 
     val availablePlugins by PluginManager.plugins.collectAsState()
     val activeSourceId by PluginManager.activeSourceId.collectAsState()
 
+    val activePlugin = remember(availablePlugins, activeSourceId) {
+        availablePlugins.firstOrNull { it.id == activeSourceId }
+            ?: availablePlugins.firstOrNull { it.isInstalled && it.isEnabled }
+            ?: availablePlugins.firstOrNull()
+    }
+    val activeSourceShortName = remember(activePlugin) {
+        activePlugin?.name
+            ?.removeSuffix(" Extractor")
+            ?.trim()
+            ?.ifBlank { activePlugin.name }
+            ?: "No Plugin"
+    }
+
+    val pluginLookupCache = remember(anime.id) { mutableMapOf<String, CachedPluginLookup>() }
+
+    var sourceAvailability by remember(anime.id) {
+        mutableStateOf<SourceAvailabilityState>(
+            SourceAvailabilityState.Checking(activePlugin?.name ?: "Source Plugin")
+        )
+    }
+
     var showSourceSheet by remember { mutableStateOf(false) }
     var extensionSearchQuery by remember { mutableStateOf("") }
     var selectedFramework by remember { mutableStateOf("All Sources") }
 
-    suspend fun fetchPluginEpisodes() {
-        val activePlugin = availablePlugins.firstOrNull { it.id == activeSourceId } ?: availablePlugins.firstOrNull()
-        if (activePlugin == null || !activePlugin.isInstalled || !activePlugin.isEnabled) {
-            anikotoEpisodes = null
+    suspend fun fetchPluginEpisodes(forceRefresh: Boolean = false) {
+        val currentPlugin = availablePlugins.firstOrNull { it.id == activeSourceId }
+            ?: availablePlugins.firstOrNull { it.isInstalled && it.isEnabled }
+            ?: availablePlugins.firstOrNull()
+
+        if (currentPlugin == null || !currentPlugin.isInstalled) {
+            pluginEpisodes = null
+            isLoadingPluginEpisodes = false
+            sourceAvailability = SourceAvailabilityState.NoActivePlugin(
+                "${currentPlugin?.name ?: "Source plugin"} is not installed. Select or install a source plugin in Settings → Video Source Plugins."
+            )
             return
         }
-        isLoadingPluginEpisodes = true
-        try {
-            val titleCandidates = listOfNotNull(
-                anime.englishTitle,
-                anime.title,
-                anime.romajiTitle,
-                anime.japaneseTitle
-            ).map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        if (!currentPlugin.isEnabled) {
+            pluginEpisodes = null
+            isLoadingPluginEpisodes = false
+            sourceAvailability = SourceAvailabilityState.NoActivePlugin(
+                "${currentPlugin.name} is turned off. Enable it or switch to another installed plugin."
+            )
+            return
+        }
 
-            val authority = activePlugin.providerAuthority
+        val titleCandidates = listOfNotNull(
+            anime.englishTitle,
+            anime.title,
+            anime.romajiTitle,
+            anime.japaneseTitle
+        ).map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        val titleSet = titleCandidates.toSet()
+
+        if (forceRefresh) {
+            pluginLookupCache.remove(currentPlugin.id)
+        } else {
+            val cached = pluginLookupCache[currentPlugin.id]
+            if (cached != null) {
+                val alreadyFound = cached.availability is SourceAvailabilityState.Available
+                val noNewTitles = cached.checkedTitles.containsAll(titleSet)
+                if (alreadyFound || noNewTitles) {
+                    pluginEpisodes = cached.episodes
+                    sourceAvailability = cached.availability
+                    isLoadingPluginEpisodes = false
+                    return
+                }
+            }
+        }
+
+        pluginEpisodes = null
+        isLoadingPluginEpisodes = true
+        sourceAvailability = SourceAvailabilityState.Checking(currentPlugin.name)
+        try {
+            val authority = currentPlugin.providerAuthority
             var slug: String? = null
             for (candidate in titleCandidates) {
                 slug = PluginBridge.findSlug(context, candidate, authority = authority)
                 if (slug != null) break
             }
-            if (slug != null) {
-                val list = PluginBridge.getEpisodes(context, slug, authority = authority)
-                if (list.isNotEmpty()) {
-                    anikotoEpisodes = list.map { anikotoEp ->
-                        Episode(
-                            id = anikotoEp.id,
-                            episodeNumber = anikotoEp.num.toInt(),
-                            title = anikotoEp.title,
-                            duration = anime.duration,
-                            thumbnail = anime.bannerUrl.ifBlank { anime.coverUrl },
-                            description = "Streamed via ${activePlugin.name}"
-                        )
+
+            val fetchedEpisodes = if (slug != null) {
+                PluginBridge.getEpisodes(context, slug, authority = authority)
+            } else {
+                emptyList()
+            }
+
+            if (fetchedEpisodes.isNotEmpty()) {
+                val mapped = fetchedEpisodes.map { ep ->
+                    Episode(
+                        id = ep.id,
+                        episodeNumber = ep.num.toInt(),
+                        title = ep.title,
+                        duration = anime.duration,
+                        thumbnail = anime.bannerUrl.ifBlank { anime.coverUrl },
+                        description = "Streamed via ${currentPlugin.name}"
+                    )
+                }
+                val availState = SourceAvailabilityState.Available(
+                    pluginName = currentPlugin.name,
+                    episodeCount = mapped.size
+                )
+                pluginEpisodes = mapped
+                sourceAvailability = availState
+                pluginLookupCache[currentPlugin.id] = CachedPluginLookup(
+                    episodes = mapped,
+                    availability = availState,
+                    checkedTitles = titleSet
+                )
+            } else {
+                // Not available on the currently selected plugin — check other installed plugins (reusing cache first)
+                val otherInstalled = availablePlugins.filter {
+                    it.isInstalled && it.isEnabled && it.id != currentPlugin.id
+                }
+                val verifiedAlts = mutableListOf<AnimeSourcePlugin>()
+                for (alt in otherInstalled) {
+                    val altCached = pluginLookupCache[alt.id]
+                    if (altCached != null) {
+                        if (altCached.availability is SourceAvailabilityState.Available) {
+                            verifiedAlts.add(alt)
+                        }
+                        continue
+                    }
+                    var altFound = false
+                    for (candidate in titleCandidates) {
+                        val altSlug = PluginBridge.findSlug(context, candidate, authority = alt.providerAuthority)
+                        if (altSlug != null) {
+                            altFound = true
+                            break
+                        }
+                    }
+                    if (altFound) {
+                        verifiedAlts.add(alt)
                     }
                 }
+
+                val unavailState = SourceAvailabilityState.Unavailable(
+                    pluginName = currentPlugin.name,
+                    reason = "'${anime.title}' has no episodes available on ${currentPlugin.name}.",
+                    verifiedAlternatives = verifiedAlts,
+                    otherInstalledPlugins = otherInstalled
+                )
+                pluginEpisodes = null
+                sourceAvailability = unavailState
+                pluginLookupCache[currentPlugin.id] = CachedPluginLookup(
+                    episodes = null,
+                    availability = unavailState,
+                    checkedTitles = titleSet
+                )
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            val otherInstalled = availablePlugins.filter {
+                it.isInstalled && it.isEnabled && it.id != currentPlugin.id
+            }
+            pluginEpisodes = null
+            sourceAvailability = SourceAvailabilityState.Unavailable(
+                pluginName = currentPlugin.name,
+                reason = "Could not load episodes from ${currentPlugin.name}. Try switching to another source plugin.",
+                verifiedAlternatives = emptyList(),
+                otherInstalledPlugins = otherInstalled
+            )
         } finally {
             isLoadingPluginEpisodes = false
         }
     }
 
-    // Fetch real playable episode list from KAnikoto Android library plugin if installed & enabled
-    LaunchedEffect(anime.id, anime.englishTitle, anime.romajiTitle, availablePlugins, activeSourceId) {
-        fetchPluginEpisodes()
+    // Fetch real playable episode list once per (anime, active plugin); avoids spurious refetches on list/metadata updates
+    LaunchedEffect(
+        anime.id,
+        activePlugin?.id,
+        activePlugin?.isInstalled,
+        activePlugin?.isEnabled,
+        anime.englishTitle,
+        anime.romajiTitle
+    ) {
+        fetchPluginEpisodes(forceRefresh = false)
     }
 
     // Lazily load MAL tab data when the user switches to Cast / Media / Info
@@ -138,30 +287,26 @@ fun DetailScreen(
         }
     }
 
-    // Merge KAnikoto playable episodes with MAL/TMDB/Kitsu/AniList episode metadata & stills
+    // Merge active plugin playable episodes with MAL/TMDB/Kitsu/AniList episode metadata & stills
     val catalogByNum = remember(anime.episodeList) {
         anime.episodeList.associateBy { it.episodeNumber }
     }
-    val displayEpisodes = remember(anikotoEpisodes, anime.episodeList, catalogByNum) {
-        val pluginEps = anikotoEpisodes
-        if (pluginEps != null) {
-            pluginEps.map { pEp ->
-                val meta = catalogByNum[pEp.episodeNumber]
-                if (meta != null) {
-                    pEp.copy(
-                        title = meta.title.ifBlank { pEp.title },
-                        thumbnail = meta.thumbnail.ifBlank { pEp.thumbnail },
-                        titleJapanese = meta.titleJapanese,
-                        aired = meta.aired,
-                        isFiller = meta.isFiller,
-                        isRecap = meta.isRecap,
-                        infoSource = meta.infoSource,
-                        thumbnailSource = meta.thumbnailSource
-                    )
-                } else pEp
-            }
-        } else {
-            anime.episodeList
+    val displayEpisodes = remember(pluginEpisodes, catalogByNum) {
+        val pluginEps = pluginEpisodes ?: return@remember emptyList()
+        pluginEps.map { pEp ->
+            val meta = catalogByNum[pEp.episodeNumber]
+            if (meta != null) {
+                pEp.copy(
+                    title = meta.title.ifBlank { pEp.title },
+                    thumbnail = meta.thumbnail.ifBlank { pEp.thumbnail },
+                    titleJapanese = meta.titleJapanese,
+                    aired = meta.aired,
+                    isFiller = meta.isFiller,
+                    isRecap = meta.isRecap,
+                    infoSource = meta.infoSource,
+                    thumbnailSource = meta.thumbnailSource
+                )
+            } else pEp
         }
     }
     val animeForPlayback = remember(anime, displayEpisodes) {
@@ -190,7 +335,7 @@ fun DetailScreen(
                         IconButton(
                             onClick = {
                                 viewModel.refreshSelectedAnime()
-                                coroutineScope.launch { fetchPluginEpisodes() }
+                                coroutineScope.launch { fetchPluginEpisodes(forceRefresh = true) }
                             },
                             colors = IconButtonDefaults.iconButtonColors(
                                 containerColor = Color.Black.copy(alpha = 0.5f),
@@ -371,8 +516,20 @@ fun DetailScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
 
+                            val chipIsUnavailable = sourceAvailability is SourceAvailabilityState.Unavailable ||
+                                sourceAvailability is SourceAvailabilityState.NoActivePlugin
+                            val chipContainerColor = when {
+                                chipIsUnavailable -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.75f)
+                                sourceAvailability is SourceAvailabilityState.Available -> Color(0xFF22C55E).copy(alpha = 0.16f)
+                                else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                            }
+                            val chipContentColor = when {
+                                chipIsUnavailable -> MaterialTheme.colorScheme.error
+                                sourceAvailability is SourceAvailabilityState.Available -> Color(0xFF4ADE80)
+                                else -> MaterialTheme.colorScheme.primary
+                            }
                             Surface(
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                color = chipContainerColor,
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.clickable { showSourceSheet = true }
                             ) {
@@ -380,17 +537,32 @@ fun DetailScreen(
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        Icons.Default.Extension,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
+                                    if (sourceAvailability is SourceAvailabilityState.Checking) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(12.dp),
+                                            strokeWidth = 1.6.dp,
+                                            color = chipContentColor
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = when {
+                                                chipIsUnavailable -> Icons.Default.WarningAmber
+                                                sourceAvailability is SourceAvailabilityState.Available -> Icons.Default.CheckCircle
+                                                else -> Icons.Default.Extension
+                                            },
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp),
+                                            tint = chipContentColor
+                                        )
+                                    }
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "Source: KAnikoto",
+                                        text = when (sourceAvailability) {
+                                            is SourceAvailabilityState.Unavailable -> "Source: $activeSourceShortName • N/A"
+                                            else -> "Source: $activeSourceShortName"
+                                        },
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
+                                        color = chipContentColor,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
@@ -428,30 +600,91 @@ fun DetailScreen(
                             Spacer(modifier = Modifier.height(12.dp))
                         }
 
-                        // Primary Play Action Button
+                        // Primary Play / Switch Source Action Button
+                        val availabilitySnapshot = sourceAvailability
+                        val recommendedPlugin = (availabilitySnapshot as? SourceAvailabilityState.Unavailable)
+                            ?.verifiedAlternatives?.firstOrNull()
                         Button(
                             onClick = {
-                                val firstEpisode = displayEpisodes.firstOrNull()
-                                if (firstEpisode != null) {
-                                    viewModel.playEpisode(animeForPlayback, firstEpisode)
+                                when (availabilitySnapshot) {
+                                    is SourceAvailabilityState.Available -> {
+                                        val firstEpisode = displayEpisodes.firstOrNull()
+                                        if (firstEpisode != null) {
+                                            viewModel.playEpisode(animeForPlayback, firstEpisode)
+                                        }
+                                    }
+                                    is SourceAvailabilityState.Unavailable -> {
+                                        if (recommendedPlugin != null) {
+                                            PluginManager.setActiveSource(recommendedPlugin.id)
+                                            Toast.makeText(context, "Switched source to ${recommendedPlugin.name}", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            showSourceSheet = true
+                                        }
+                                    }
+                                    is SourceAvailabilityState.NoActivePlugin -> {
+                                        showSourceSheet = true
+                                    }
+                                    is SourceAvailabilityState.Checking -> Unit
                                 }
                             },
+                            enabled = availabilitySnapshot !is SourceAvailabilityState.Checking,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary
+                                containerColor = when (availabilitySnapshot) {
+                                    is SourceAvailabilityState.Unavailable,
+                                    is SourceAvailabilityState.NoActivePlugin -> MaterialTheme.colorScheme.tertiary
+                                    else -> MaterialTheme.colorScheme.primary
+                                },
+                                contentColor = when (availabilitySnapshot) {
+                                    is SourceAvailabilityState.Unavailable,
+                                    is SourceAvailabilityState.NoActivePlugin -> MaterialTheme.colorScheme.onTertiary
+                                    else -> Color.White
+                                }
                             )
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = when {
-                                    isLoadingPluginEpisodes -> "Syncing KAnikoto Episodes..."
-                                    uiState.isLoadingCatalogEpisodes && displayEpisodes.isEmpty() -> "Loading Episodes..."
-                                    else -> "Start Watching Episode 1"
-                                },
-                                fontWeight = FontWeight.Bold
-                            )
+                            when (availabilitySnapshot) {
+                                is SourceAvailabilityState.Checking -> {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = "Checking $activeSourceShortName...",
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                is SourceAvailabilityState.Available -> {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Start Watching Episode 1",
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                is SourceAvailabilityState.Unavailable -> {
+                                    Icon(Icons.Default.SwapHoriz, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = if (recommendedPlugin != null) {
+                                            "Switch to ${recommendedPlugin.name.removeSuffix(" Extractor").trim()}"
+                                        } else {
+                                            "Switch Source Plugin"
+                                        },
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                is SourceAvailabilityState.NoActivePlugin -> {
+                                    Icon(Icons.Default.Extension, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Select Source Plugin",
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -511,24 +744,180 @@ fun DetailScreen(
 
                 // ── Tab 0: Episodes ─────────────────────────────────────────
                 if (selectedTab == 0) {
-                    if (uiState.isLoadingCatalogEpisodes && displayEpisodes.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(32.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator()
+                    when (val avail = sourceAvailability) {
+                        is SourceAvailabilityState.Checking -> {
+                            item {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 24.dp, vertical = 32.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    CircularProgressIndicator(strokeWidth = 2.5.dp)
+                                    Text(
+                                        text = "Checking availability on ${avail.pluginName}...",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
-                    } else {
-                        items(displayEpisodes, key = { "${it.id}_${it.episodeNumber}" }) { episode ->
-                            Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                                EpisodeCard(
-                                    episode = episode,
-                                    onClick = { viewModel.playEpisode(animeForPlayback, episode) }
-                                )
+
+                        is SourceAvailabilityState.Available -> {
+                            items(displayEpisodes, key = { "${it.id}_${it.episodeNumber}" }) { episode ->
+                                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                                    EpisodeCard(
+                                        episode = episode,
+                                        onClick = { viewModel.playEpisode(animeForPlayback, episode) }
+                                    )
+                                }
+                            }
+                        }
+
+                        is SourceAvailabilityState.Unavailable -> {
+                            item {
+                                Card(
+                                    shape = RoundedCornerShape(18.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                    ),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(18.dp),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.errorContainer,
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier.size(40.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.SwapHoriz,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.onErrorContainer
+                                                    )
+                                                }
+                                            }
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = "Not available on ${avail.pluginName}",
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Text(
+                                                    text = "Switch to another installed source plugin to watch this anime.",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+
+                                        if (avail.verifiedAlternatives.isNotEmpty()) {
+                                            Text(
+                                                text = "Available on:",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color(0xFF4ADE80)
+                                            )
+                                            avail.verifiedAlternatives.forEach { alt ->
+                                                Button(
+                                                    onClick = {
+                                                        PluginManager.setActiveSource(alt.id)
+                                                        Toast.makeText(context, "Switched source to ${alt.name}", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text("Switch to ${alt.name}", fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        } else if (avail.otherInstalledPlugins.isNotEmpty()) {
+                                            avail.otherInstalledPlugins.forEach { alt ->
+                                                FilledTonalButton(
+                                                    onClick = {
+                                                        PluginManager.setActiveSource(alt.id)
+                                                        Toast.makeText(context, "Switched source to ${alt.name}", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text("Try ${alt.name}", fontWeight = FontWeight.SemiBold)
+                                                }
+                                            }
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { showSourceSheet = true },
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(Icons.Default.Extension, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Choose Source Plugin")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        is SourceAvailabilityState.NoActivePlugin -> {
+                            item {
+                                Card(
+                                    shape = RoundedCornerShape(18.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(18.dp),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ExtensionOff,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(34.dp)
+                                        )
+                                        Text(
+                                            text = "No Active Source Plugin",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = avail.message,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Button(
+                                            onClick = { showSourceSheet = true },
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(Icons.Default.Extension, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Choose Source Plugin")
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -918,6 +1307,14 @@ fun DetailScreen(
                             val isActive = activeSourceId == plugin.id
                             Surface(
                                 onClick = {
+                                    if (!plugin.isInstalled) {
+                                        Toast.makeText(context, "${plugin.name} is not installed (Settings → Video Source Plugins)", Toast.LENGTH_SHORT).show()
+                                        return@Surface
+                                    }
+                                    if (!plugin.isEnabled) {
+                                        Toast.makeText(context, "${plugin.name} is disabled (Settings → Video Source Plugins)", Toast.LENGTH_SHORT).show()
+                                        return@Surface
+                                    }
                                     PluginManager.setActiveSource(plugin.id)
                                     showSourceSheet = false
                                 },

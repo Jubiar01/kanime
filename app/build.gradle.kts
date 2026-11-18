@@ -9,6 +9,20 @@ val localProps = Properties().apply {
 }
 val tmdbApiKey: String = (localProps.getProperty("TMDB_API_KEY") ?: System.getenv("TMDB_API_KEY") ?: "").trim()
 
+// Load release signing credentials from private app/info.txt (gitignored)
+val releaseSigningInfo: Map<String, String> = run {
+    val infoFile = file("info.txt")
+    if (!infoFile.exists()) {
+        emptyMap()
+    } else {
+        infoFile.readLines().mapNotNull { line ->
+            val match = Regex("""^\s*(\w+)\s+['"]([^'"]+)['"]\s*$""").find(line)
+            match?.let { it.groupValues[1] to it.groupValues[2] }
+        }.toMap()
+    }
+}
+val releaseKeystoreFile = file("marvin-J.jks")
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
@@ -31,9 +45,24 @@ android {
         buildConfigField("String", "TMDB_API_KEY", "\"${tmdbApiKey.replace("\"", "\\\"")}\"")
     }
 
+    signingConfigs {
+        if (releaseKeystoreFile.exists() && releaseSigningInfo.isNotEmpty()) {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseSigningInfo["storePassword"]
+                keyAlias = releaseSigningInfo["keyAlias"]
+                keyPassword = releaseSigningInfo["keyPassword"]
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

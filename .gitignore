@@ -12,9 +12,11 @@ local.properties
 .externalNativeBuild
 .cxx
 
-# Private plugin module (excluded from public repo)
+# Private plugin modules (excluded from public repo)
 /kanikoto-plugin/
 kanikoto-plugin/
+/kanimeheaven-plugin/
+kanimeheaven-plugin/
 
 # Signing keys & credentials (keep private!)
 *.jks

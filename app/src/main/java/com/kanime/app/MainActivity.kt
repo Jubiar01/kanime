@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -11,6 +13,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.fadeIn
@@ -45,6 +50,12 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: AnimeViewModel by viewModels()
 
+    private val _isInPipMode = MutableStateFlow(false)
+    val isInPipModeFlow: StateFlow<Boolean> = _isInPipMode.asStateFlow()
+
+    @Volatile
+    var onUserLeaveHintPipHandler: (() -> Unit)? = null
+
     private val packageChangeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             PluginManager.checkPluginStatus(applicationContext)
@@ -77,20 +88,44 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val uiState by viewModel.uiState.collectAsState()
+            val isInPipMode by isInPipModeFlow.collectAsState()
 
             KAnimeTheme(darkTheme = uiState.isDarkTheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    KAnimeApp(viewModel = viewModel, uiState = uiState)
+                    KAnimeApp(
+                        viewModel = viewModel,
+                        uiState = uiState,
+                        isInPipMode = isInPipMode
+                    )
                 }
             }
         }
     }
 
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        _isInPipMode.value = isInPictureInPictureMode
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Auto-enter PiP on Android 8.0–11 when pressing Home during active video playback
+        if (Build.VERSION.SDK_INT in Build.VERSION_CODES.O until Build.VERSION_CODES.S) {
+            onUserLeaveHintPipHandler?.invoke()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            _isInPipMode.value = isInPictureInPictureMode
+        }
         // Immediately refresh plugin status when returning from system installer/uninstaller
         PluginManager.checkPluginStatus(applicationContext)
     }
@@ -107,7 +142,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun KAnimeApp(
     viewModel: AnimeViewModel,
-    uiState: AnimeUiState
+    uiState: AnimeUiState,
+    isInPipMode: Boolean = false
 ) {
     // If an episode is playing, present the full-screen player directly on the Activity window
     val autoPlayNext by CatalogConfig.autoPlayNextFlow.collectAsState()
@@ -124,6 +160,7 @@ fun KAnimeApp(
             episode = currentEp,
             initialPositionMs = uiState.playingInitialPositionMs,
             autoPlayNext = autoPlayNext,
+            isInPipMode = isInPipMode,
             onToggleAutoPlayNext = { viewModel.setAutoPlayNext(it) },
             onSaveProgress = { posMs, durMs -> viewModel.saveWatchProgress(anime, currentEp, posMs, durMs) },
             onDismiss = { viewModel.closePlayer() },

@@ -24,3 +24,6 @@ include(":app")
 if (file("kanikoto-plugin").exists()) {
     include(":kanikoto-plugin")
 }
+if (file("kanimeheaven-plugin").exists()) {
+    include(":kanimeheaven-plugin")
+}

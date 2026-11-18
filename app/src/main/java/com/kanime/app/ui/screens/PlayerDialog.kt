@@ -3,18 +3,29 @@
 package com.kanime.app.ui.screens
 
 import android.app.Activity
+import android.app.PendingIntent
+import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.drawable.Icon as AndroidIcon
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.util.Rational
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import androidx.core.content.ContextCompat
+import com.kanime.app.MainActivity
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -26,6 +37,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -48,8 +60,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -60,6 +74,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.geometry.Offset
@@ -129,6 +144,68 @@ private fun Context.findActivity(): Activity? {
     return null
 }
 
+private const val ACTION_PIP_CONTROL = "com.kanime.app.PIP_CONTROL"
+private const val EXTRA_PIP_COMMAND = "pip_command"
+private const val PIP_CMD_PLAY_PAUSE = 1
+private const val PIP_CMD_REWIND = 2
+private const val PIP_CMD_FORWARD = 3
+
+@androidx.annotation.RequiresApi(Build.VERSION_CODES.O)
+private fun buildPipParams(
+    context: Context,
+    isPlaying: Boolean,
+    videoWidth: Int,
+    videoHeight: Int,
+    autoEnter: Boolean
+): PictureInPictureParams {
+    val ratio = if (videoWidth > 0 && videoHeight > 0) {
+        val aspect = videoWidth.toFloat() / videoHeight.toFloat()
+        // Android PiP requires aspect ratio between 0.418410 and 2.390000
+        if (aspect in 0.42f..2.38f) Rational(videoWidth, videoHeight) else Rational(16, 9)
+    } else {
+        Rational(16, 9)
+    }
+
+    fun makeAction(cmd: Int, iconRes: Int, title: String): RemoteAction {
+        val intent = Intent(ACTION_PIP_CONTROL)
+            .setPackage(context.packageName)
+            .putExtra(EXTRA_PIP_COMMAND, cmd)
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            cmd,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return RemoteAction(
+            AndroidIcon.createWithResource(context, iconRes),
+            title,
+            title,
+            pendingIntent
+        )
+    }
+
+    val actions = listOf(
+        makeAction(PIP_CMD_REWIND, android.R.drawable.ic_media_rew, "Rewind 10s"),
+        makeAction(
+            PIP_CMD_PLAY_PAUSE,
+            if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+            if (isPlaying) "Pause" else "Play"
+        ),
+        makeAction(PIP_CMD_FORWARD, android.R.drawable.ic_media_ff, "Forward 10s")
+    )
+
+    val builder = PictureInPictureParams.Builder()
+        .setAspectRatio(ratio)
+        .setActions(actions)
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        builder.setAutoEnterEnabled(autoEnter)
+        builder.setSeamlessResizeEnabled(true)
+    }
+
+    return builder.build()
+}
+
 @Suppress("DEPRECATION")
 @OptIn(UnstableApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -137,6 +214,7 @@ fun PlayerDialog(
     episode: Episode,
     initialPositionMs: Long = 0L,
     autoPlayNext: Boolean = true,
+    isInPipMode: Boolean = false,
     onToggleAutoPlayNext: ((Boolean) -> Unit)? = null,
     onSaveProgress: ((positionMs: Long, durationMs: Long) -> Unit)? = null,
     onDismiss: () -> Unit,
@@ -148,7 +226,8 @@ fun PlayerDialog(
     val coroutineScope = rememberCoroutineScope()
     val activity = remember(context) { context.findActivity() }
     val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val effectiveInPip = isInPipMode || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && activity?.isInPictureInPictureMode == true)
+    val isLandscape = !effectiveInPip && configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     val availablePlugins by PluginManager.plugins.collectAsState()
     val activeSourceId by PluginManager.activeSourceId.collectAsState()
@@ -169,6 +248,7 @@ fun PlayerDialog(
     var showSubtitlesSheet by remember { mutableStateOf(false) }
     var showAudioSheet by remember { mutableStateOf(false) }
     var showEnhanceSheet by remember { mutableStateOf(false) }
+    var showPictureSheet by remember { mutableStateOf(false) }
 
     val activeAudioShortLabel = remember(embeddedAudioTracks, selectedEmbeddedAudioKey, selectedAudioType) {
         val activeEmbedded = embeddedAudioTracks.firstOrNull { it.key == selectedEmbeddedAudioKey }
@@ -215,16 +295,26 @@ fun PlayerDialog(
         }
     }
 
-    // ExoPlayer & Aspect ratio state
+    // ExoPlayer & Picture / Aspect ratio state
     var isPlaying by remember { mutableStateOf(true) }
     var currentPositionMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
     var showControls by remember { mutableStateOf(true) }
     var isControlsLocked by remember { mutableStateOf(false) }
-    var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
+    var pictureMode by remember { mutableStateOf(VideoPictureMode.FIT) }
+    var videoZoom by remember { mutableFloatStateOf(1.0f) }
+    val resizeMode = pictureMode.exoResizeMode
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
     var aspectRatioToastMessage by remember { mutableStateOf<String?>(null) }
     var isEpisodeOrderReversed by remember { mutableStateOf(false) }
+
+    val formattedEpisodeHeading = remember(episode.episodeNumber, episode.title) {
+        formatEpisodeHeading(episode.episodeNumber, episode.title)
+    }
+    val picturePillLabel = remember(pictureMode, videoZoom) {
+        val zoomSuffix = if (videoZoom > 1.01f) " ${(videoZoom * 100).toInt()}%" else ""
+        "Picture: ${pictureMode.shortLabel}$zoomSuffix"
+    }
 
     // Auto-Play Next Episode & Watch Progress state (reset per episode)
     val autoPlayTriggered = remember(anime.id, episode.episodeNumber) { mutableStateOf(false) }
@@ -258,22 +348,19 @@ fun PlayerDialog(
         }
     }
 
-    // Cycle aspect ratio: Fit -> Cover (Zoom) -> Stretch (Fill) -> Fit
+    // Cycle aspect ratio: Fit -> Cover (Fill Screen) -> Stretch (Full) -> 4:3 Classic -> Fit
     fun cycleAspectRatio() {
-        resizeMode = when (resizeMode) {
-            AspectRatioFrameLayout.RESIZE_MODE_FIT -> {
-                aspectRatioToastMessage = "Cover (Fill Screen)"
-                AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-            }
-            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> {
-                aspectRatioToastMessage = "Stretch (Full)"
-                AspectRatioFrameLayout.RESIZE_MODE_FILL
-            }
-            else -> {
-                aspectRatioToastMessage = "Fit (Original 16:9)"
-                AspectRatioFrameLayout.RESIZE_MODE_FIT
-            }
+        val next = when (pictureMode) {
+            VideoPictureMode.FIT -> VideoPictureMode.COVER
+            VideoPictureMode.COVER -> VideoPictureMode.STRETCH
+            VideoPictureMode.STRETCH -> VideoPictureMode.CLASSIC_4_3
+            VideoPictureMode.CLASSIC_4_3 -> VideoPictureMode.FIT
         }
+        pictureMode = next
+        if (next == VideoPictureMode.FIT) {
+            videoZoom = 1.0f
+        }
+        aspectRatioToastMessage = next.toastLabel
     }
 
     // Auto-dismiss aspect ratio toast after 2 seconds
@@ -284,16 +371,27 @@ fun PlayerDialog(
         }
     }
 
-    // Restore screen orientation when player dialog is dismissed
+    // Restore screen orientation & disable auto-PiP when player dialog is dismissed
     DisposableEffect(Unit) {
         onDispose {
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            (activity as? MainActivity)?.onUserLeaveHintPipHandler = null
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                try {
+                    activity?.setPictureInPictureParams(
+                        PictureInPictureParams.Builder()
+                            .setAutoEnterEnabled(false)
+                            .build()
+                    )
+                } catch (_: Exception) {
+                }
+            }
         }
     }
 
     // Auto-hide controls timer (5 seconds)
-    LaunchedEffect(showControls, isPlaying, isControlsLocked, showStreamsSheet, showSourceSheet, showSpeedSheet, showSubtitlesSheet, showAudioSheet, showEnhanceSheet) {
-        if (showControls && isPlaying && !isControlsLocked && !showStreamsSheet && !showSourceSheet && !showSpeedSheet && !showSubtitlesSheet && !showAudioSheet && !showEnhanceSheet) {
+    LaunchedEffect(showControls, isPlaying, isControlsLocked, showStreamsSheet, showSourceSheet, showSpeedSheet, showSubtitlesSheet, showAudioSheet, showEnhanceSheet, showPictureSheet) {
+        if (showControls && isPlaying && !isControlsLocked && !showStreamsSheet && !showSourceSheet && !showSpeedSheet && !showSubtitlesSheet && !showAudioSheet && !showEnhanceSheet && !showPictureSheet) {
             delay(5000)
             showControls = false
         }
@@ -319,38 +417,52 @@ fun PlayerDialog(
             }
 
             val authority = activePlugin.providerAuthority
-            resolutionState = StreamResolutionState.Loading("Resolving anime via ${activePlugin.name}...")
+            resolutionState = StreamResolutionState.Loading("Loading servers via ${activePlugin.name}...")
             try {
-                val titleCandidates = listOfNotNull(
-                    anime.englishTitle,
-                    anime.title,
-                    anime.romajiTitle,
-                    anime.japaneseTitle
-                ).map { it.trim() }.filter { it.isNotBlank() }.distinct()
-                var slug: String? = null
-                for (candidate in titleCandidates) {
-                    slug = PluginBridge.findSlug(context, candidate, authority = authority)
-                    if (slug != null) break
+                // Fast path: if DetailScreen already resolved this episode ID for this exact plugin,
+                // skip redundant findSlug + getEpisodes and fetch servers directly!
+                val alreadyResolvedForActivePlugin = episode.id.isNotBlank() &&
+                    episode.description == "Streamed via ${activePlugin.name}"
+
+                var servers = if (alreadyResolvedForActivePlugin) {
+                    PluginBridge.getServers(context, episode.id, authority = authority)
+                } else {
+                    emptyList()
                 }
 
-                if (slug == null) {
-                    resolutionState = StreamResolutionState.Error("Anime '${anime.title}' was not found on ${activePlugin.name}.")
-                    return@launch
+                if (servers.isEmpty()) {
+                    resolutionState = StreamResolutionState.Loading("Resolving anime via ${activePlugin.name}...")
+                    val titleCandidates = listOfNotNull(
+                        anime.englishTitle,
+                        anime.title,
+                        anime.romajiTitle,
+                        anime.japaneseTitle
+                    ).map { it.trim() }.filter { it.isNotBlank() }.distinct()
+                    var slug: String? = null
+                    for (candidate in titleCandidates) {
+                        slug = PluginBridge.findSlug(context, candidate, authority = authority)
+                        if (slug != null) break
+                    }
+
+                    if (slug == null) {
+                        resolutionState = StreamResolutionState.Error("Anime '${anime.title}' was not found on ${activePlugin.name}.")
+                        return@launch
+                    }
+
+                    resolutionState = StreamResolutionState.Loading("Fetching episode nodes...")
+                    val episodes = PluginBridge.getEpisodes(context, slug, authority = authority)
+                    val targetEp = episodes.firstOrNull { it.num == episode.episodeNumber.toDouble() }
+                        ?: episodes.firstOrNull { Math.abs(it.num - episode.episodeNumber) < 0.1 }
+                        ?: episodes.firstOrNull()
+
+                    if (targetEp == null) {
+                        resolutionState = StreamResolutionState.Error("Episode ${episode.episodeNumber} not found on ${activePlugin.name}.")
+                        return@launch
+                    }
+
+                    resolutionState = StreamResolutionState.Loading("Loading server nodes...")
+                    servers = PluginBridge.getServers(context, targetEp.id, authority = authority)
                 }
-
-                resolutionState = StreamResolutionState.Loading("Fetching episode nodes...")
-                val episodes = PluginBridge.getEpisodes(context, slug, authority = authority)
-                val targetEp = episodes.firstOrNull { it.num == episode.episodeNumber.toDouble() }
-                    ?: episodes.firstOrNull { Math.abs(it.num - episode.episodeNumber) < 0.1 }
-                    ?: episodes.firstOrNull()
-
-                if (targetEp == null) {
-                    resolutionState = StreamResolutionState.Error("Episode ${episode.episodeNumber} not found on ${activePlugin.name}.")
-                    return@launch
-                }
-
-                resolutionState = StreamResolutionState.Loading("Loading server nodes...")
-                val servers = PluginBridge.getServers(context, targetEp.id, authority = authority)
                 availableServers = servers
 
                 val sortedServers = servers.sortedWith(
@@ -492,7 +604,7 @@ fun PlayerDialog(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(24.dp),
+                        .padding(horizontal = 28.dp, vertical = 24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -503,12 +615,37 @@ fun PlayerDialog(
                     )
                     Spacer(modifier = Modifier.height(20.dp))
                     Text(
-                        text = state.message,
+                        text = anime.title,
                         color = Color.White,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 360.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = formattedEpisodeHeading,
+                        color = Color(0xFFA5B4FC),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 360.dp)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = state.message,
+                        color = Color.White.copy(alpha = 0.72f),
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 340.dp)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
                     Surface(
                         color = Color(0xFF333C57),
                         shape = RoundedCornerShape(8.dp)
@@ -558,11 +695,16 @@ fun PlayerDialog(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Retry")
                         }
+                        Button(onClick = { showSourceSheet = true }) {
+                            Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Switch Source")
+                        }
                         if (availableServers.isNotEmpty()) {
-                            Button(onClick = { showStreamsSheet = true }) {
+                            OutlinedButton(onClick = { showStreamsSheet = true }) {
                                 Icon(Icons.Default.Dns, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Switch Stream")
+                                Text("Servers")
                             }
                         }
                     }
@@ -761,18 +903,33 @@ fun PlayerDialog(
                     animeRebuildGeneration += 1
                 }
 
-                // Pause/resume cleanly when screen turns OFF/ON or app goes to background/foreground
+                // Pause/resume cleanly when screen turns OFF/ON or app goes to background/foreground,
+                // while keeping video playing seamlessly when entering Picture-in-Picture mode!
                 DisposableEffect(lifecycleOwner, exoPlayer) {
-                    var wasPlayingOnPause = false
+                    var wasPlayingOnStop = false
                     val observer = LifecycleEventObserver { _, event ->
                         when (event) {
                             Lifecycle.Event.ON_PAUSE -> {
-                                wasPlayingOnPause = exoPlayer.playWhenReady || exoPlayer.isPlaying
+                                val inPipNow = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N &&
+                                    activity?.isInPictureInPictureMode == true
                                 val pausePos = exoPlayer.currentPosition.coerceAtLeast(0L)
                                 val pauseDur = exoPlayer.duration.coerceAtLeast(0L)
                                 resumePositionRef.longValue = pausePos
-                                resumePlayWhenReadyRef.value = wasPlayingOnPause
                                 latestOnSaveProgress?.invoke(pausePos, pauseDur)
+                                if (!inPipNow) {
+                                    wasPlayingOnStop = exoPlayer.playWhenReady || exoPlayer.isPlaying
+                                    resumePlayWhenReadyRef.value = wasPlayingOnStop
+                                    exoPlayer.pause()
+                                }
+                            }
+                            Lifecycle.Event.ON_STOP -> {
+                                // Fires when screen turns off, app is backgrounded without PiP, or user closes PiP window
+                                wasPlayingOnStop = exoPlayer.playWhenReady || exoPlayer.isPlaying
+                                val stopPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                                val stopDur = exoPlayer.duration.coerceAtLeast(0L)
+                                resumePositionRef.longValue = stopPos
+                                resumePlayWhenReadyRef.value = wasPlayingOnStop
+                                latestOnSaveProgress?.invoke(stopPos, stopDur)
                                 exoPlayer.pause()
                             }
                             Lifecycle.Event.ON_RESUME -> {
@@ -781,7 +938,8 @@ fun PlayerDialog(
                                     exoPlayer.prepare()
                                     if (pos > 0L) exoPlayer.seekTo(pos)
                                 }
-                                if (wasPlayingOnPause) {
+                                if (wasPlayingOnStop) {
+                                    wasPlayingOnStop = false
                                     exoPlayer.playWhenReady = true
                                     exoPlayer.play()
                                 }
@@ -812,6 +970,112 @@ fun PlayerDialog(
                 fun pausePlayback() {
                     resumePlayWhenReadyRef.value = false
                     exoPlayer.pause()
+                }
+
+                fun enterPipMode() {
+                    val act = activity ?: return
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                        aspectRatioToastMessage = "Picture-in-Picture requires Android 8.0+"
+                        return
+                    }
+                    if (!act.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+                        aspectRatioToastMessage = "Picture-in-Picture is not supported on this device"
+                        return
+                    }
+                    showControls = false
+                    showStreamsSheet = false
+                    showSourceSheet = false
+                    showSpeedSheet = false
+                    showSubtitlesSheet = false
+                    showAudioSheet = false
+                    showEnhanceSheet = false
+                    showPictureSheet = false
+                    try {
+                        val vs = exoPlayer.videoSize
+                        val params = buildPipParams(
+                            context = context,
+                            isPlaying = exoPlayer.isPlaying || exoPlayer.playWhenReady,
+                            videoWidth = vs.width,
+                            videoHeight = vs.height,
+                            autoEnter = exoPlayer.isPlaying || exoPlayer.playWhenReady
+                        )
+                        act.enterPictureInPictureMode(params)
+                    } catch (e: Exception) {
+                        Log.w("PlayerDialog", "Failed to enter PiP mode: ${e.message}")
+                        aspectRatioToastMessage = "Enable Picture-in-Picture in App Settings"
+                    }
+                }
+
+                // Keep PiP RemoteActions (Play/Pause, -10s, +10s) and Android 12+ auto-enter PiP in sync
+                LaunchedEffect(exoPlayer, isPlaying, effectiveInPip) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity != null) {
+                        try {
+                            val vs = exoPlayer.videoSize
+                            activity.setPictureInPictureParams(
+                                buildPipParams(
+                                    context = context,
+                                    isPlaying = isPlaying,
+                                    videoWidth = vs.width,
+                                    videoHeight = vs.height,
+                                    autoEnter = isPlaying
+                                )
+                            )
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+
+                // Register Android 8.0–11 Home-button auto-PiP handler & PiP RemoteAction controls receiver
+                DisposableEffect(activity, exoPlayer) {
+                    val mainAct = activity as? MainActivity
+                    mainAct?.onUserLeaveHintPipHandler = {
+                        if (exoPlayer.isPlaying || exoPlayer.playWhenReady) {
+                            enterPipMode()
+                        }
+                    }
+
+                    val pipReceiver = object : BroadcastReceiver() {
+                        override fun onReceive(ctx: Context?, intent: Intent?) {
+                            if (intent?.action != ACTION_PIP_CONTROL) return
+                            when (intent.getIntExtra(EXTRA_PIP_COMMAND, -1)) {
+                                PIP_CMD_PLAY_PAUSE -> {
+                                    if (exoPlayer.isPlaying) pausePlayback() else resumeOrPlay()
+                                }
+                                PIP_CMD_REWIND -> {
+                                    val target = (exoPlayer.currentPosition - 10_000L).coerceAtLeast(0L)
+                                    exoPlayer.seekTo(target)
+                                    currentPositionMs = target
+                                    resumePositionRef.longValue = target
+                                }
+                                PIP_CMD_FORWARD -> {
+                                    val dur = exoPlayer.duration.coerceAtLeast(0L)
+                                    val target = if (dur > 0L) {
+                                        (exoPlayer.currentPosition + 10_000L).coerceAtMost(dur)
+                                    } else {
+                                        exoPlayer.currentPosition + 10_000L
+                                    }
+                                    exoPlayer.seekTo(target)
+                                    currentPositionMs = target
+                                    resumePositionRef.longValue = target
+                                }
+                            }
+                        }
+                    }
+
+                    ContextCompat.registerReceiver(
+                        context,
+                        pipReceiver,
+                        IntentFilter(ACTION_PIP_CONTROL),
+                        ContextCompat.RECEIVER_NOT_EXPORTED
+                    )
+
+                    onDispose {
+                        mainAct?.onUserLeaveHintPipHandler = null
+                        try {
+                            context.unregisterReceiver(pipReceiver)
+                        } catch (_: Exception) {
+                        }
+                    }
                 }
 
                 fun performDoubleTapSeek(deltaSeconds: Int) {
@@ -945,6 +1209,22 @@ fun PlayerDialog(
                     applyCaptionStyle(context, playerView.subtitleView, captionStyle)
                 }
 
+                // Live-apply Picture / Aspect Ratio mode directly on PlayerView & ExoPlayer
+                LaunchedEffect(playerView, exoPlayer, pictureMode, effectiveInPip) {
+                    val targetResize = if (effectiveInPip) {
+                        AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    } else {
+                        pictureMode.exoResizeMode
+                    }
+                    playerView.resizeMode = targetResize
+                    exoPlayer.videoScalingMode = if (!effectiveInPip && pictureMode == VideoPictureMode.COVER) {
+                        C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+                    } else {
+                        C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+                    }
+                    playerView.requestLayout()
+                }
+
                 DisposableEffect(exoPlayer) {
                     playerView.player = exoPlayer
                     playerView.onResume()
@@ -963,26 +1243,67 @@ fun PlayerDialog(
                     }
                 }
 
-                // Common Video Surface Composable
+                // Common Video Surface Composable (applies Picture Mode & Zoom cleanly in both Portrait & Landscape)
                 @Composable
                 fun VideoSurface(modifier: Modifier = Modifier) {
-                    AndroidView(
-                        factory = {
-                            (playerView.parent as? ViewGroup)?.removeView(playerView)
-                            playerView
-                        },
-                        update = { pv ->
-                            if (pv.player != exoPlayer) pv.player = exoPlayer
-                            pv.resizeMode = resizeMode
-                        },
-                        modifier = modifier
-                    )
+                    val baseScaleX = when {
+                        effectiveInPip -> 1f
+                        pictureMode == VideoPictureMode.CLASSIC_4_3 -> 0.75f
+                        !isLandscape && pictureMode == VideoPictureMode.COVER -> 1.18f
+                        !isLandscape && pictureMode == VideoPictureMode.STRETCH -> 1.16f
+                        else -> 1f
+                    }
+                    val baseScaleY = when {
+                        effectiveInPip -> 1f
+                        !isLandscape && pictureMode == VideoPictureMode.COVER -> 1.18f
+                        else -> 1f
+                    }
+                    val zoomFactor = if (effectiveInPip) 1f else videoZoom
+
+                    Box(
+                        modifier = modifier.clipToBounds(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AndroidView(
+                            factory = {
+                                (playerView.parent as? ViewGroup)?.removeView(playerView)
+                                playerView
+                            },
+                            update = { pv ->
+                                if (pv.player != exoPlayer) pv.player = exoPlayer
+                                val targetResize = if (effectiveInPip) {
+                                    AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                } else {
+                                    pictureMode.exoResizeMode
+                                }
+                                if (pv.resizeMode != targetResize) {
+                                    pv.resizeMode = targetResize
+                                    pv.requestLayout()
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    scaleX = baseScaleX * zoomFactor
+                                    scaleY = baseScaleY * zoomFactor
+                                }
+                        )
+                    }
                 }
 
                 // ══════════════════════════════════════════════════════════════
-                // CONDITIONAL LAYOUT: PORTRAIT (IMAGE 1) VS LANDSCAPE (IMAGE 4)
+                // CONDITIONAL LAYOUT: PIP FULL-BLEED VS PORTRAIT VS LANDSCAPE
                 // ══════════════════════════════════════════════════════════════
-                if (!isLandscape) {
+                if (effectiveInPip) {
+                    // Clean full-bleed video surface inside the floating Picture-in-Picture window
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black)
+                    ) {
+                        VideoSurface(modifier = Modifier.fillMaxSize())
+                    }
+                } else if (!isLandscape) {
                     // ──────────────────────────────────────────────────────────
                     // PORTRAIT MODE (Image 1: Embedded 16:9 Video + Details & Episodes)
                     // ──────────────────────────────────────────────────────────
@@ -1121,11 +1442,7 @@ fun PlayerDialog(
 
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 IconButton(
-                                                    onClick = {
-                                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                                            activity?.enterPictureInPictureMode()
-                                                        }
-                                                    },
+                                                    onClick = { enterPipMode() },
                                                     modifier = Modifier.size(44.dp)
                                                 ) {
                                                     Icon(
@@ -1199,19 +1516,21 @@ fun PlayerDialog(
                         ) {
                             // Title & Subtitle (Image 1)
                             Text(
-                                text = "Episode ${episode.episodeNumber}: ${episode.title}",
+                                text = formattedEpisodeHeading,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(modifier = Modifier.height(2.dp))
+                            Spacer(modifier = Modifier.height(3.dp))
                             Text(
-                                text = anime.title.uppercase(),
-                                style = MaterialTheme.typography.labelSmall,
+                                text = anime.title,
+                                style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color.White.copy(alpha = 0.60f)
+                                color = Color.White.copy(alpha = 0.65f),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
 
                             Spacer(modifier = Modifier.height(14.dp))
@@ -1287,8 +1606,12 @@ fun PlayerDialog(
                                 ) {
                                     showSourceSheet = true
                                 }
-                                ActionPill(icon = Icons.Default.AspectRatio, label = "Picture") {
-                                    cycleAspectRatio()
+                                ActionPill(
+                                    icon = Icons.Default.AspectRatio,
+                                    label = picturePillLabel,
+                                    isActive = pictureMode != VideoPictureMode.FIT || videoZoom > 1.01f
+                                ) {
+                                    showPictureSheet = true
                                 }
                                 ActionPill(icon = Icons.Default.CloudUpload, label = "Submit skip times") {
                                     aspectRatioToastMessage = "Skip times submitted"
@@ -1636,23 +1959,23 @@ fun PlayerDialog(
 
                                         Spacer(modifier = Modifier.width(6.dp))
 
-                                        // Episode & Anime Title (Image 4)
+                                        // Episode & Anime Title (smooth marquee for long titles so nothing clips off-screen)
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = "Episode ${episode.episodeNumber}: ${episode.title}",
+                                                text = formattedEpisodeHeading,
                                                 color = Color.White,
                                                 style = MaterialTheme.typography.titleMedium,
                                                 fontWeight = FontWeight.Bold,
                                                 maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
+                                                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
                                             )
                                             Text(
-                                                text = anime.title.uppercase(),
-                                                color = Color.White.copy(alpha = 0.65f),
+                                                text = anime.title,
+                                                color = Color.White.copy(alpha = 0.7f),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.SemiBold,
                                                 maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
+                                                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
                                             )
                                         }
 
@@ -1691,11 +2014,7 @@ fun PlayerDialog(
                                                 }
 
                                                 IconButton(
-                                                    onClick = {
-                                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                                            activity?.enterPictureInPictureMode()
-                                                        }
-                                                    },
+                                                    onClick = { enterPipMode() },
                                                     modifier = Modifier.size(38.dp)
                                                 ) {
                                                     Icon(
@@ -1941,11 +2260,7 @@ fun PlayerDialog(
                                             ) {
                                                 // Icon 1: PiP [⧉]
                                                 IconButton(
-                                                    onClick = {
-                                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                                            activity?.enterPictureInPictureMode()
-                                                        }
-                                                    },
+                                                    onClick = { enterPipMode() },
                                                     modifier = Modifier.size(44.dp)
                                                 ) {
                                                     Icon(
@@ -1956,7 +2271,7 @@ fun PlayerDialog(
                                                     )
                                                 }
 
-                                                // Icon 2: Aspect ratio toggle [ ⛶ ]
+                                                // Icon 2: Aspect ratio / Picture toggle [ ⛶ ]
                                                 IconButton(
                                                     onClick = { cycleAspectRatio() },
                                                     modifier = Modifier.size(44.dp)
@@ -1964,7 +2279,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         Icons.Default.AspectRatio,
                                                         contentDescription = "Aspect Ratio",
-                                                        tint = if (resizeMode != AspectRatioFrameLayout.RESIZE_MODE_FIT) Color(0xFFA5B4FC) else Color.White,
+                                                        tint = if (pictureMode != VideoPictureMode.FIT || videoZoom > 1.01f) Color(0xFFA5B4FC) else Color.White,
                                                         modifier = Modifier.size(22.dp)
                                                     )
                                                 }
@@ -2015,7 +2330,7 @@ fun PlayerDialog(
         // FLOATING ASPECT RATIO TOAST OVERLAY
         // ══════════════════════════════════════════════════════════════
         AnimatedVisibility(
-            visible = aspectRatioToastMessage != null,
+            visible = !effectiveInPip && aspectRatioToastMessage != null,
             enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
             exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
             modifier = Modifier
@@ -2051,7 +2366,7 @@ fun PlayerDialog(
         // ══════════════════════════════════════════════════════════════
         // BOTTOM SHEETS BACKDROP
         // ══════════════════════════════════════════════════════════════
-        if (showStreamsSheet || showSourceSheet || showSpeedSheet || showSubtitlesSheet || showAudioSheet || showEnhanceSheet) {
+        if (!effectiveInPip && (showStreamsSheet || showSourceSheet || showSpeedSheet || showSubtitlesSheet || showAudioSheet || showEnhanceSheet || showPictureSheet)) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -2064,6 +2379,7 @@ fun PlayerDialog(
                         showSubtitlesSheet = false
                         showAudioSheet = false
                         showEnhanceSheet = false
+                        showPictureSheet = false
                     }
             )
         }
@@ -3355,6 +3671,158 @@ fun PlayerDialog(
         }
 
         // ══════════════════════════════════════════════════════════════
+        // PICTURE & ASPECT RATIO BOTTOM SHEET
+        // ══════════════════════════════════════════════════════════════
+        AnimatedVisibility(
+            visible = !effectiveInPip && showPictureSheet,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .zIndex(20f)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = 600.dp)
+                    .fillMaxWidth(),
+                color = Color(0xFF1E1E24),
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                shadowElevation = 16.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(vertical = 4.dp)
+                            .size(width = 44.dp, height = 4.dp)
+                            .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AspectRatio,
+                                contentDescription = null,
+                                tint = Color(0xFFA5B4FC),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Text(
+                                text = "Picture & Aspect Ratio",
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        TextButton(
+                            onClick = {
+                                pictureMode = VideoPictureMode.FIT
+                                videoZoom = 1.0f
+                                aspectRatioToastMessage = "Picture reset to Fit (100%)"
+                            }
+                        ) {
+                            Text("Reset", color = Color(0xFFA5B4FC), fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    // Aspect Ratio Mode Options
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        VideoPictureMode.entries.forEach { mode ->
+                            val isSelected = pictureMode == mode
+                            Surface(
+                                onClick = {
+                                    pictureMode = mode
+                                    if (mode == VideoPictureMode.FIT) videoZoom = 1.0f
+                                    aspectRatioToastMessage = mode.toastLabel
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
+                                border = if (isSelected) BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.65f)) else null,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = mode.title,
+                                            color = Color.White,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = mode.subtitle,
+                                            color = Color.White.copy(alpha = 0.6f),
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = "Selected",
+                                            tint = Color(0xFFA5B4FC),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+
+                    // Live Video Zoom Slider (100% - 150%)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Video Zoom",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "${(videoZoom * 100).toInt()}%",
+                                color = Color(0xFFA5B4FC),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Slider(
+                            value = videoZoom,
+                            onValueChange = { videoZoom = it },
+                            valueRange = 1.0f..1.5f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFFA5B4FC),
+                                activeTrackColor = Color(0xFFA5B4FC),
+                                inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
         // ANIME4K UPSCALER & LINE SHARPENING BOTTOM SHEET
         // ══════════════════════════════════════════════════════════════
         AnimatedVisibility(
@@ -3863,6 +4331,52 @@ private fun ActionPill(
             )
         }
     }
+}
+
+private enum class VideoPictureMode(
+    val shortLabel: String,
+    val title: String,
+    val subtitle: String,
+    val toastLabel: String,
+    val exoResizeMode: Int
+) {
+    FIT(
+        shortLabel = "Fit",
+        title = "Fit (Original 16:9)",
+        subtitle = "Keep original video ratio with no cropping",
+        toastLabel = "Picture: Fit (Original)",
+        exoResizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+    ),
+    COVER(
+        shortLabel = "Cover",
+        title = "Cover (Zoom to Fill)",
+        subtitle = "Crop edges to fill wide displays without black bars",
+        toastLabel = "Picture: Cover (Fill)",
+        exoResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+    ),
+    STRETCH(
+        shortLabel = "Stretch",
+        title = "Stretch (Full Screen)",
+        subtitle = "Stretch frame to fill entire viewport",
+        toastLabel = "Picture: Stretch (Full)",
+        exoResizeMode = AspectRatioFrameLayout.RESIZE_MODE_FILL
+    ),
+    CLASSIC_4_3(
+        shortLabel = "4:3",
+        title = "Classic 4:3",
+        subtitle = "Retro 4:3 framing for classic anime",
+        toastLabel = "Picture: Classic 4:3",
+        exoResizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+    )
+}
+
+private fun formatEpisodeHeading(episodeNumber: Int, rawTitle: String): String {
+    val trimmed = rawTitle.trim()
+    val isRedundant = trimmed.isBlank() ||
+        trimmed.equals("Episode $episodeNumber", ignoreCase = true) ||
+        trimmed.equals("Episode 0$episodeNumber", ignoreCase = true) ||
+        trimmed.equals("Ep $episodeNumber", ignoreCase = true)
+    return if (isRedundant) "Episode $episodeNumber" else "Ep $episodeNumber • $trimmed"
 }
 
 private fun formatTime(ms: Long): String {
