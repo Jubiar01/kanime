@@ -10,6 +10,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -810,7 +812,10 @@ internal fun PluginsScreenContent(
                     .widthIn(max = 760.dp)
                     .fillMaxSize()
                     .padding(horizontal = KanimeSpacing.lg),
-                contentPadding = PaddingValues(top = 76.dp, bottom = 96.dp),
+                contentPadding = PaddingValues(
+                    top = 76.dp,
+                    bottom = KanimeSpacing.xl + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                ),
                 verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
             ) {
                 item(key = "overview", contentType = "overview") {

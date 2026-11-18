@@ -2,7 +2,6 @@ package com.kanime.app.ui.screens
 
 import android.content.res.Configuration
 import android.os.Build
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -128,14 +127,6 @@ fun SettingsScreen(
         PluginManager.checkPluginStatusAsync(context)
     }
 
-    var showPluginsView by remember { mutableStateOf(false) }
-
-    if (showPluginsView) {
-        BackHandler { showPluginsView = false }
-        PluginsScreen(onBackClick = { showPluginsView = false })
-        return
-    }
-
     SettingsScreenContent(
         themeMode = themeMode,
         dynamicColor = dynamicColor,
@@ -151,7 +142,7 @@ fun SettingsScreen(
         tmdbApiKey = tmdbApiKey,
         onThemeModeChange = { ThemePreferences.setThemeMode(context, it) },
         onDynamicColorChange = { ThemePreferences.setDynamicColor(context, it) },
-        onOpenPlugins = { showPluginsView = true },
+        onOpenPlugins = { viewModel.openPlugins() },
         onChoosePluginFolder = { folderPickerLauncher.launch(null) },
         onOpenSetup = { OnboardingPreferences.reset(context) },
         onAutoPlayNextChange = { viewModel.setAutoPlayNext(it) },

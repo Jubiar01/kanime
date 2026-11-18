@@ -81,6 +81,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -129,6 +130,8 @@ fun GlassSurface(
         else -> glass.fill
     }
     val tintColor = accentTint ?: glass.tint
+    val sheenColor = glass.topHighlight.copy(alpha = glass.topHighlight.alpha * 0.42f)
+    val depthShade = glass.shadowColor.copy(alpha = glass.shadowColor.alpha * 0.45f)
 
     val shadowMod = if (showShadow) {
         Modifier.shadow(
@@ -165,20 +168,53 @@ fun GlassSurface(
             .then(shadowMod)
             .clip(shape)
             .drawBehind {
+                // 1. frosted base
                 drawRect(color = baseFill)
+                // 2. body tint (top -> bottom)
                 drawRect(
                     brush = Brush.verticalGradient(
                         colors = listOf(tintColor, tintColor.copy(alpha = tintColor.alpha * 0.25f))
                     )
                 )
+                // 3. diagonal sheen: light catching the top-left of the pane
+                drawRect(
+                    brush = Brush.linearGradient(
+                        colorStops = arrayOf(
+                            0.0f to sheenColor,
+                            0.45f to sheenColor.copy(alpha = sheenColor.alpha * 0.25f),
+                            1.0f to Color.Transparent
+                        ),
+                        start = Offset.Zero,
+                        end = Offset(size.width, size.height)
+                    )
+                )
+                // 4. inner bottom shade gives the pane thickness
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.0f to Color.Transparent,
+                            0.62f to Color.Transparent,
+                            1.0f to depthShade
+                        )
+                    )
+                )
             }
             .drawWithContent {
                 drawContent()
+                // 5. specular rim: fades out at both ends instead of a hard line
                 drawLine(
-                    color = glass.topHighlight,
-                    start = Offset(size.width * 0.12f, 1.dp.toPx()),
-                    end = Offset(size.width * 0.88f, 1.dp.toPx()),
-                    strokeWidth = 1.dp.toPx()
+                    brush = Brush.horizontalGradient(
+                        colorStops = arrayOf(
+                            0.0f to Color.Transparent,
+                            0.5f to glass.topHighlight,
+                            1.0f to Color.Transparent
+                        ),
+                        startX = size.width * 0.08f,
+                        endX = size.width * 0.92f
+                    ),
+                    start = Offset(size.width * 0.08f, 1.dp.toPx()),
+                    end = Offset(size.width * 0.92f, 1.dp.toPx()),
+                    strokeWidth = 1.5.dp.toPx()
                 )
             }
             .border(
@@ -557,11 +593,22 @@ fun GlassBottomBar(
                         label = "NavItemScale"
                     )
 
-                    val pillBg = if (isSelected) {
-                        MaterialTheme.colorScheme.primary
+                    val primary = MaterialTheme.colorScheme.primary
+                    val pillBrush = if (isSelected) {
+                        Brush.verticalGradient(
+                            listOf(lerp(primary, Color.White, 0.16f), primary)
+                        )
                     } else {
-                        Color.Transparent
+                        Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
                     }
+                    val itemWeight by animateFloatAsState(
+                        targetValue = if (isSelected) 1.35f else 1f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        label = "NavItemWeight"
+                    )
                     val iconTint = if (isSelected) {
                         MaterialTheme.colorScheme.onPrimary
                     } else {
@@ -570,14 +617,14 @@ fun GlassBottomBar(
 
                     Box(
                         modifier = Modifier
-                            .weight(if (isSelected) 1.35f else 1f)
+                            .weight(itemWeight)
                             .heightIn(min = KanimeSpacing.minTouchTarget)
                             .graphicsLayer {
                                 scaleX = scale
                                 scaleY = scale
                             }
                             .clip(PillShape)
-                            .background(pillBg)
+                            .background(pillBrush)
                             .clickable(
                                 interactionSource = itemInteraction,
                                 indication = ripple(color = MaterialTheme.colorScheme.primary),

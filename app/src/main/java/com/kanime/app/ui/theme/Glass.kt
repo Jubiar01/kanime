@@ -60,7 +60,11 @@ data class KanimeGlassTokens(
 
     val borderBrush: Brush
         get() = Brush.linearGradient(
-            colors = listOf(borderStart, borderEnd)
+            colors = listOf(
+                borderStart,
+                borderEnd,
+                borderStart.copy(alpha = borderStart.alpha * 0.38f)
+            )
         )
 }
 
@@ -82,10 +86,10 @@ fun kanimeGlassTokensFor(
             borderStart = colorScheme.onSurface.copy(alpha = 0.35f),
             borderEnd = colorScheme.onSurface.copy(alpha = 0.05f),
             topHighlight = colorScheme.onSurface.copy(alpha = 0.20f),
-            shadowColor = colorScheme.scrim.copy(alpha = 0.16f),
-            shadowElevation = 4.dp,
-            shadowOffsetY = 2.dp,
-            blurRadius = 24.dp,
+            shadowColor = colorScheme.scrim.copy(alpha = 0.34f),
+            shadowElevation = 10.dp,
+            shadowOffsetY = 4.dp,
+            blurRadius = 28.dp,
             ambientTop = colorScheme.background,
             ambientBottom = colorScheme.surfaceContainerLowest,
             ambientGlowPrimary = colorScheme.primary.copy(alpha = 0.12f),
@@ -111,9 +115,9 @@ fun kanimeGlassTokensFor(
             topHighlight = colorScheme.surfaceContainerLowest.copy(alpha = 0.92f),
             // Warm coffee-tinted shadow — never gray or black
             shadowColor = colorScheme.primary.copy(alpha = 0.13f),
-            shadowElevation = 12.dp,
-            shadowOffsetY = 4.dp,
-            blurRadius = 28.dp,
+            shadowElevation = 14.dp,
+            shadowOffsetY = 5.dp,
+            blurRadius = 32.dp,
             ambientTop = colorScheme.background,
             ambientBottom = colorScheme.surfaceContainerLow,
             ambientGlowPrimary = colorScheme.primaryContainer.copy(alpha = 0.48f),
@@ -219,9 +223,18 @@ fun KanimeAmbientBackdrop(
                     center = bottomCenter,
                     radius = bottomRadius
                 )
+                val midCenter = Offset(w * 0.74f, h * 0.42f)
+                val midRadius = (w.coerceAtLeast(h) * 0.34f).coerceAtLeast(1f)
+                val midGlow = Brush.radialGradient(
+                    0.0f to glass.ambientGlowPrimary.copy(alpha = glass.ambientGlowPrimary.alpha * 0.55f),
+                    1.0f to transparentBg,
+                    center = midCenter,
+                    radius = midRadius
+                )
                 onDrawBehind {
                     drawRect(brush = baseBrush)
                     drawCircle(brush = topGlow, radius = topRadius, center = topCenter)
+                    drawCircle(brush = midGlow, radius = midRadius, center = midCenter)
                     drawCircle(brush = bottomGlow, radius = bottomRadius, center = bottomCenter)
                 }
             },

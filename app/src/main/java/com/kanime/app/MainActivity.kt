@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -69,6 +70,7 @@ import com.kanime.app.ui.screens.ExploreScreen
 import com.kanime.app.ui.screens.HomeScreen
 import com.kanime.app.ui.screens.OnboardingScreen
 import com.kanime.app.ui.screens.PlayerDialog
+import com.kanime.app.ui.screens.PluginsScreen
 import com.kanime.app.ui.screens.SettingsScreen
 import com.kanime.app.ui.screens.WatchlistScreen
 import com.kanime.app.ui.theme.KAnimeTheme
@@ -256,6 +258,9 @@ fun KAnimeApp(
         return
     }
 
+    BackHandler(enabled = uiState.showPluginsScreen && uiState.selectedAnime == null) {
+        viewModel.closePlugins()
+    }
     BackHandler(enabled = uiState.selectedAnime != null) {
         viewModel.closeAnime()
     }
@@ -263,7 +268,7 @@ fun KAnimeApp(
     KAnimeShell(
         currentTab = uiState.currentTab,
         watchlistCount = uiState.watchlistIds.size,
-        showChrome = uiState.selectedAnime == null,
+        showChrome = uiState.selectedAnime == null && !uiState.showPluginsScreen,
         isDarkTheme = isDarkTheme,
         onSelectTab = { viewModel.selectTab(it) },
         onToggleTheme = { ThemePreferences.cycleThemeMode(context, isDarkTheme) }
@@ -276,6 +281,9 @@ fun KAnimeApp(
                 uiState = uiState,
                 onBackClick = { viewModel.closeAnime() }
             )
+        } else if (uiState.showPluginsScreen) {
+            // Full-screen sub-page: shell top bar + bottom bar are hidden (showChrome = false)
+            PluginsScreen(onBackClick = { viewModel.closePlugins() })
         } else {
             AnimatedContent(
                 targetState = uiState.currentTab,
@@ -398,7 +406,13 @@ internal fun KAnimeShell(
                     content(topPad, bottomPad)
                 }
 
-                if (showChrome) {
+                AnimatedVisibility(
+                    visible = showChrome,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
                     GlassTopBar(
                         title = {
                             Text(
@@ -441,6 +455,7 @@ internal fun KAnimeShell(
                         onSelect = { id -> onSelectTab(NavTab.valueOf(id)) },
                         modifier = Modifier.align(Alignment.BottomCenter)
                     )
+                    }
                 }
             }
         }
