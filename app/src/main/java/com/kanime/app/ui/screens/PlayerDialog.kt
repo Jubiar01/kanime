@@ -139,6 +139,7 @@ import com.kanime.app.ui.theme.PillShape
 import com.kanime.app.ui.theme.ThemePreferences
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -318,6 +319,9 @@ fun PlayerDialog(
     var isLoadingOpenSubtitles by remember(anime.id, episode.episodeNumber) { mutableStateOf(false) }
     var openSubtitleFetched by remember(anime.id, episode.episodeNumber) { mutableStateOf(false) }
     var subtitleDelayMs by remember(anime.id, episode.episodeNumber) { mutableLongStateOf(0L) }
+    var subtitleScale by remember(anime.id, episode.episodeNumber) { mutableDoubleStateOf(1.0) }
+    var isAutoSyncing by remember(anime.id, episode.episodeNumber) { mutableStateOf(false) }
+    var autoSyncedKey by remember(anime.id, episode.episodeNumber) { mutableStateOf("") }
     val subtitlePluginEntry = remember(allPlugins) { allPlugins.firstOrNull { it.isSubtitlePlugin } }
     val activeSubtitlePlugin = remember(allPlugins) {
         allPlugins.firstOrNull { it.isSubtitlePlugin && it.isInstalled && it.isEnabled }
@@ -394,6 +398,71 @@ fun PlayerDialog(
         derivedStateOf { skipTimes.activeSegmentAt(currentPositionMs) }
     }
 
+    // Subtitle auto-sync (KOpenSubtitle 1.0.3+): compares the subtitle's intro/outro gaps with the
+    // real intro/outro positions of THIS video (AniSkip) and fixes late/early/drifting subtitles.
+    fun runSubtitleAutoSync(manual: Boolean) {
+        val plugin = activeSubtitlePlugin ?: return
+        val track = openSubtitleTracks.firstOrNull { it.lang.equals(selectedSubtitleTrack, ignoreCase = true) }
+        if (track == null) {
+            if (manual) aspectRatioToastMessage = "Select an OpenSubtitles track first"
+            return
+        }
+        val intro = skipTimes.intro
+        val outro = skipTimes.outro
+        if (intro == null && outro == null) {
+            if (manual) aspectRatioToastMessage = "No intro/outro data for this episode yet"
+            return
+        }
+        if (isAutoSyncing) return
+        coroutineScope.launch {
+            isAutoSyncing = true
+            val res = PluginBridge.analyzeSync(
+                context = context,
+                url = track.url,
+                opStartMs = intro?.startMs ?: 0L,
+                opEndMs = intro?.endMs ?: 0L,
+                edStartMs = outro?.startMs ?: 0L,
+                edEndMs = outro?.endMs ?: 0L,
+                authority = plugin.providerAuthority
+            )
+            isAutoSyncing = false
+            if (res == null) {
+                if (manual) aspectRatioToastMessage = "Update KOpenSubtitle to 1.0.3 for auto-sync"
+                return@launch
+            }
+            val usable = res.ok && (res.confidence == "high" || (manual && res.confidence == "medium"))
+            if (!usable) {
+                if (manual) aspectRatioToastMessage = "Couldn't auto-sync this subtitle — adjust manually"
+                return@launch
+            }
+            if (res.offsetMs == 0L && res.scale == 1.0) {
+                if (manual) aspectRatioToastMessage = "Subtitles are already in sync"
+                return@launch
+            }
+            subtitleScale = res.scale
+            subtitleDelayMs = res.offsetMs.coerceIn(-60_000L, 60_000L)
+            val sec = subtitleDelayMs / 1000.0
+            aspectRatioToastMessage = "Subtitles auto-synced " + String.format(Locale.US, "%+.1fs", sec) +
+                if (res.scale != 1.0) " (fps fix)" else ""
+        }
+    }
+
+    LaunchedEffect(openSubtitleTracks, selectedSubtitleTrack, skipTimes, useOpenSubtitle) {
+        if (!useOpenSubtitle || openSubtitleTracks.isEmpty() || skipTimes.isEmpty) return@LaunchedEffect
+        val track = openSubtitleTracks.firstOrNull { it.lang.equals(selectedSubtitleTrack, ignoreCase = true) }
+            ?: return@LaunchedEffect
+        if (autoSyncedKey == track.url) return@LaunchedEffect
+        if (autoSyncedKey.isNotEmpty()) {
+            // Switched to another subtitle file: each file has its own timing, start fresh.
+            subtitleDelayMs = 0L
+            subtitleScale = 1.0
+        } else if (subtitleDelayMs != 0L || subtitleScale != 1.0) {
+            return@LaunchedEffect // user already adjusted manually
+        }
+        autoSyncedKey = track.url
+        runSubtitleAutoSync(manual = false)
+    }
+
     // Audio & Brightness Gestures (Image 6)
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     var brightness by remember {
@@ -464,8 +533,12 @@ fun PlayerDialog(
     }
 
     // Resolve stream via the active installed plugin through PluginBridge
+    var resolveJob by remember { mutableStateOf<Job?>(null) }
     fun resolveStream(serverToUse: PluginServer? = null) {
-        coroutineScope.launch {
+        // Cancel any in-flight resolve (e.g. user skipped to another episode) so a late result of the
+        // PREVIOUS episode can never overwrite the new episode's stream.
+        resolveJob?.cancel()
+        resolveJob = coroutineScope.launch {
             PluginManager.checkPluginStatus(context)
             val videoPlugins = PluginManager.plugins.value.filter { it.isVideoPlugin }
             val activePlugin = videoPlugins.firstOrNull { it.id == activeSourceId }
@@ -573,10 +646,18 @@ fun PlayerDialog(
                 } else {
                     resolutionState = StreamResolutionState.Error("Unable to connect to streaming servers on ${activePlugin.name}. Please verify plugin is installed and active.")
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // superseded by a newer resolve (episode skip) — must not overwrite its state
             } catch (e: Exception) {
                 resolutionState = StreamResolutionState.Error("${activePlugin.name} stream extraction error: ${e.message}")
             }
         }
+    }
+
+    // On episode change, drop the previous episode's stream immediately so its video can never play
+    // together with the new episode's subtitles while the new stream is still resolving.
+    LaunchedEffect(anime.id, episode.episodeNumber) {
+        resolutionState = StreamResolutionState.Loading("Loading episode ${episode.episodeNumber}...")
     }
 
     LaunchedEffect(anime.id, episode.episodeNumber, selectedAudioType, activeSourceId) {
@@ -612,6 +693,7 @@ fun PlayerDialog(
                 mediaType = anime.type,
                 episodeTitle = episode.title,
                 episodeAired = episode.aired,
+                runtimeMin = Regex("""\d+""").find(episode.duration.ifBlank { anime.duration })?.value?.toIntOrNull() ?: 0,
                 authority = subPlugin.providerAuthority
             )
             openSubtitleTracks = fetched
@@ -1037,10 +1119,12 @@ fun PlayerDialog(
                 // Dynamically attach/detach KOpenSubtitle tracks & apply real-time subtitle sync offset
                 // in-place on the existing ExoPlayer without recreating shaders or losing playback position.
                 val effectiveOpenSubsActive = useOpenSubtitle && activeSubtitlePlugin != null
-                val activeDelayTrackKey = if (subtitleDelayMs != 0L) selectedSubtitleTrack else ""
-                val currentSubSignature = remember(effectiveOpenSubsActive, openSubtitleTracks, subtitleDelayMs, activeDelayTrackKey) {
+                val hasSubShift = subtitleDelayMs != 0L || subtitleScale != 1.0
+                val activeDelayTrackKey = if (hasSubShift) selectedSubtitleTrack else ""
+                val currentSubSignature = remember(effectiveOpenSubsActive, openSubtitleTracks, subtitleDelayMs, subtitleScale, activeDelayTrackKey) {
                     val urls = if (effectiveOpenSubsActive) openSubtitleTracks.joinToString("|") { it.url } else ""
-                    "$effectiveOpenSubsActive::$urls::$subtitleDelayMs::$activeDelayTrackKey"
+                    "$effectiveOpenSubsActive::$urls::$subtitleDelayMs::$activeDelayTrackKey" +
+                        if (subtitleScale != 1.0) "::s$subtitleScale" else ""
                 }
                 val appliedSubSignatureRef = remember(exoPlayer) {
                     val initUrls = if (effectiveOpenSubsActive) openSubtitleTracks.joinToString("|") { it.url } else ""
@@ -1066,12 +1150,13 @@ fun PlayerDialog(
 
                     val updatedConfigs = mergedSubtitles.map { sub ->
                         val langCode = subtitleLanguageCode(sub.lang)
-                        val subUri = if (subtitleDelayMs != 0L && sub == targetShiftTrack) {
+                        val subUri = if ((subtitleDelayMs != 0L || subtitleScale != 1.0) && sub == targetShiftTrack) {
                             SubtitleOffsetHelper.resolveOffsetSubtitleUri(
                                 context = context,
                                 url = sub.url,
                                 referer = stream.referer,
-                                offsetMs = subtitleDelayMs
+                                offsetMs = subtitleDelayMs,
+                                scale = subtitleScale
                             )
                         } else {
                             Uri.parse(sub.url)
@@ -3000,6 +3085,7 @@ fun PlayerDialog(
                                                 selectedSubtitleTrack = sourceSub?.lang ?: embeddedTextTrackLabels.firstOrNull() ?: "English [CC]"
                                             }
                                             subtitleDelayMs = 0L
+                                            subtitleScale = 1.0
                                         }
                                     },
                                     colors = SwitchDefaults.colors(
@@ -3058,7 +3144,22 @@ fun PlayerDialog(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         FilledTonalIconButton(
-                                            onClick = { subtitleDelayMs = (subtitleDelayMs - 500L).coerceAtLeast(-30_000L) },
+                                            onClick = { runSubtitleAutoSync(manual = true) },
+                                            enabled = !isAutoSyncing,
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            if (isAutoSyncing) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(14.dp),
+                                                    strokeWidth = 2.dp,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            } else {
+                                                Icon(Icons.Default.AutoFixHigh, contentDescription = "Auto-sync", modifier = Modifier.size(16.dp))
+                                            }
+                                        }
+                                        FilledTonalIconButton(
+                                            onClick = { subtitleDelayMs = (subtitleDelayMs - 500L).coerceAtLeast(-60_000L) },
                                             modifier = Modifier.size(32.dp)
                                         ) {
                                             Icon(Icons.Default.Remove, contentDescription = "-0.5s", modifier = Modifier.size(16.dp))
@@ -3075,11 +3176,14 @@ fun PlayerDialog(
                                             style = MaterialTheme.typography.labelLarge,
                                             fontWeight = FontWeight.Bold,
                                             modifier = Modifier
-                                                .clickable(enabled = subtitleDelayMs != 0L) { subtitleDelayMs = 0L }
+                                                .clickable(enabled = subtitleDelayMs != 0L || subtitleScale != 1.0) {
+                                                    subtitleDelayMs = 0L
+                                                    subtitleScale = 1.0
+                                                }
                                                 .padding(horizontal = 4.dp)
                                         )
                                         FilledTonalIconButton(
-                                            onClick = { subtitleDelayMs = (subtitleDelayMs + 500L).coerceAtMost(30_000L) },
+                                            onClick = { subtitleDelayMs = (subtitleDelayMs + 500L).coerceAtMost(60_000L) },
                                             modifier = Modifier.size(32.dp)
                                         ) {
                                             Icon(Icons.Default.Add, contentDescription = "+0.5s", modifier = Modifier.size(16.dp))

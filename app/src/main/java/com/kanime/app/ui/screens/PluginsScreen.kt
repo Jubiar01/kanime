@@ -4,6 +4,8 @@ import android.content.res.Configuration
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,11 +36,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.InstallMobile
+import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Subtitles
@@ -67,6 +74,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -74,11 +84,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -87,6 +101,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kanime.app.R
 import com.kanime.app.data.plugin.AnimeSourcePlugin
 import com.kanime.app.data.plugin.CatalogUpdateInfo
+import com.kanime.app.data.plugin.PluginBridge
 import com.kanime.app.data.plugin.PluginManager
 import com.kanime.app.ui.components.GlassButton
 import com.kanime.app.ui.components.GlassButtonStyle
@@ -123,6 +138,9 @@ fun PluginsScreen(
     var showAddJsonDialog by remember { mutableStateOf(false) }
     var jsonInputText by remember { mutableStateOf("") }
     var pluginToUpdate by remember { mutableStateOf<AnimeSourcePlugin?>(null) }
+    var pluginToUninstall by remember { mutableStateOf<AnimeSourcePlugin?>(null) }
+    var testingPluginId by remember { mutableStateOf<String?>(null) }
+    val testResults = remember { mutableStateMapOf<String, Pair<Boolean, String>>() }
     var preferredAudio by remember { mutableStateOf("Sub") }
     var preferredServer by remember { mutableStateOf("MegaCloud") }
 
@@ -237,12 +255,30 @@ fun PluginsScreen(
                 }
             },
             onAddJsonClick = { showAddJsonDialog = true },
+            testingPluginId = testingPluginId,
+            testResults = testResults,
             onTogglePlugin = { plugin, enabled ->
                 PluginManager.setPluginEnabled(context, plugin.id, enabled)
+                showMessage(
+                    context.getString(
+                        if (enabled) R.string.plugins_msg_enabled else R.string.plugins_msg_turned_off,
+                        plugin.name
+                    )
+                )
+            },
+            onTestConnection = { plugin ->
+                if (testingPluginId == null) {
+                    coroutineScope.launch {
+                        testingPluginId = plugin.id
+                        testResults.remove(plugin.id)
+                        testResults[plugin.id] = PluginBridge.testConnection(context, plugin.providerAuthority)
+                        testingPluginId = null
+                    }
+                }
             },
             onDownloadPlugin = { startPluginDownload(it) },
             onInstallPlugin = { PluginManager.installPluginApk(context, it) },
-            onUninstallPlugin = { PluginManager.uninstallPlugin(context, it) },
+            onUninstallPlugin = { pluginToUninstall = it },
             onUpdateDetailsClick = { pluginToUpdate = it },
             onConfigureClick = { showConfigDialog = true }
         )
@@ -267,6 +303,43 @@ fun PluginsScreen(
                 )
             }
         }
+    }
+
+    // Uninstall / delete confirmation (destructive actions are never one tap)
+    pluginToUninstall?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pluginToUninstall = null },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = {
+                Text(
+                    stringResource(
+                        if (target.isInstalled) R.string.plugins_uninstall_title else R.string.plugins_delete_title,
+                        target.name
+                    )
+                )
+            },
+            text = { Text(stringResource(R.string.plugins_uninstall_body)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pluginToUninstall = null
+                        testResults.remove(target.id)
+                        PluginManager.uninstallPlugin(context, target)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text(stringResource(if (target.isInstalled) R.string.action_uninstall else R.string.action_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pluginToUninstall = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
     }
 
     // Plugin Update / Reinstall Dialog
@@ -661,6 +734,8 @@ private fun BulletNotesList(notes: List<String>) {
 }
 
 @OptIn(ExperimentalLayoutApi::class)
+private enum class PluginFilter { All, Video, Subtitles }
+
 @Composable
 internal fun PluginsScreenContent(
     plugins: List<AnimeSourcePlugin>,
@@ -669,6 +744,8 @@ internal fun PluginsScreenContent(
     isCheckingCatalog: Boolean,
     downloadingPluginId: String?,
     downloadProgress: Float,
+    testingPluginId: String?,
+    testResults: Map<String, Pair<Boolean, String>>,
     onBackClick: () -> Unit,
     onShowReleaseNotes: () -> Unit,
     onCheckUpdates: () -> Unit,
@@ -678,9 +755,48 @@ internal fun PluginsScreenContent(
     onInstallPlugin: (AnimeSourcePlugin) -> Unit,
     onUninstallPlugin: (AnimeSourcePlugin) -> Unit,
     onUpdateDetailsClick: (AnimeSourcePlugin) -> Unit,
+    onTestConnection: (AnimeSourcePlugin) -> Unit,
     onConfigureClick: () -> Unit
 ) {
     val updates = remember(plugins) { plugins.filter { it.hasUpdate } }
+    val activeCount = remember(plugins) { plugins.count { it.isInstalled && it.isEnabled } }
+    val hasVideo = remember(plugins) { plugins.any { it.isVideoPlugin } }
+    val hasSubtitle = remember(plugins) { plugins.any { it.isSubtitlePlugin } }
+    val showFilters = hasVideo && hasSubtitle
+
+    var filterOrdinal by rememberSaveable { mutableIntStateOf(0) }
+    val filter = if (showFilters) {
+        PluginFilter.values()[filterOrdinal.coerceIn(0, PluginFilter.values().size - 1)]
+    } else {
+        PluginFilter.All
+    }
+    val visible = remember(plugins, filter) {
+        when (filter) {
+            PluginFilter.All -> plugins
+            PluginFilter.Video -> plugins.filter { it.isVideoPlugin }
+            PluginFilter.Subtitles -> plugins.filter { it.isSubtitlePlugin }
+        }
+    }
+    val grouped = showFilters && filter == PluginFilter.All
+
+    @Composable
+    fun cardFor(plugin: AnimeSourcePlugin) {
+        PluginCard(
+            plugin = plugin,
+            isDownloading = downloadingPluginId == plugin.id,
+            anyDownloading = downloadingPluginId != null,
+            downloadProgress = downloadProgress,
+            isTesting = testingPluginId == plugin.id,
+            testResult = testResults[plugin.id],
+            onToggle = { onTogglePlugin(plugin, it) },
+            onDownload = { onDownloadPlugin(plugin) },
+            onInstall = { onInstallPlugin(plugin) },
+            onUninstall = { onUninstallPlugin(plugin) },
+            onUpdateDetails = { onUpdateDetailsClick(plugin) },
+            onTestConnection = { onTestConnection(plugin) },
+            onConfigure = onConfigureClick
+        )
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -694,67 +810,68 @@ internal fun PluginsScreenContent(
                     .widthIn(max = 760.dp)
                     .fillMaxSize()
                     .padding(horizontal = KanimeSpacing.lg),
-                contentPadding = PaddingValues(top = 76.dp, bottom = 72.dp),
+                contentPadding = PaddingValues(top = 76.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
             ) {
-                if (updates.isNotEmpty()) {
-                    item(key = "updates_banner", contentType = "banner") {
-                        Surface(
-                            color = MaterialTheme.colorScheme.tertiaryContainer,
-                            shape = MaterialTheme.shapes.large,
-                            modifier = Modifier.fillMaxWidth()
+                item(key = "overview", contentType = "overview") {
+                    PluginsOverview(
+                        activeCount = activeCount,
+                        total = plugins.size,
+                        configVersion = configVersion,
+                        updates = updates,
+                        onUpdateDetailsClick = onUpdateDetailsClick
+                    )
+                }
+
+                if (showFilters) {
+                    item(key = "filters", contentType = "filters") {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm),
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
                         ) {
-                            Column(
-                                modifier = Modifier.padding(KanimeSpacing.lg),
-                                verticalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
-                            ) {
-                                Text(
-                                    text = pluralStringResource(R.plurals.plugins_updates_count, updates.size, updates.size),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                                )
-                                updates.forEach { p ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "${p.name} · v${p.version}",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Button(
-                                            onClick = { onUpdateDetailsClick(p) },
-                                            shape = PillShape,
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.tertiary,
-                                                contentColor = MaterialTheme.colorScheme.onTertiary
-                                            )
-                                        ) {
-                                            Text(stringResource(R.string.action_update))
-                                        }
-                                    }
-                                }
-                            }
+                            GlassChip(
+                                label = stringResource(R.string.plugins_filter_all),
+                                selected = filter == PluginFilter.All,
+                                onClick = { filterOrdinal = PluginFilter.All.ordinal },
+                                leadingIcon = Icons.Default.Extension
+                            )
+                            GlassChip(
+                                label = stringResource(R.string.plugins_filter_video),
+                                selected = filter == PluginFilter.Video,
+                                onClick = { filterOrdinal = PluginFilter.Video.ordinal },
+                                leadingIcon = Icons.Default.PlayCircle
+                            )
+                            GlassChip(
+                                label = stringResource(R.string.plugins_filter_subtitles),
+                                selected = filter == PluginFilter.Subtitles,
+                                onClick = { filterOrdinal = PluginFilter.Subtitles.ordinal },
+                                leadingIcon = Icons.Default.Subtitles
+                            )
                         }
                     }
                 }
 
-                items(plugins, key = { it.id }, contentType = { "plugin_card" }) { plugin ->
-                    PluginCard(
-                        plugin = plugin,
-                        isDownloading = downloadingPluginId == plugin.id,
-                        anyDownloading = downloadingPluginId != null,
-                        downloadProgress = downloadProgress,
-                        onToggle = { onTogglePlugin(plugin, it) },
-                        onDownload = { onDownloadPlugin(plugin) },
-                        onInstall = { onInstallPlugin(plugin) },
-                        onUninstall = { onUninstallPlugin(plugin) },
-                        onUpdateDetails = { onUpdateDetailsClick(plugin) },
-                        onConfigure = onConfigureClick
-                    )
+                if (visible.isEmpty()) {
+                    item(key = "empty", contentType = "empty") {
+                        PluginsEmptyState(onAddJsonClick = onAddJsonClick)
+                    }
+                } else if (grouped) {
+                    val video = visible.filter { it.isVideoPlugin }
+                    val subs = visible.filter { it.isSubtitlePlugin }
+                    if (video.isNotEmpty()) {
+                        item(key = "label_video", contentType = "label") {
+                            PluginSectionLabel(stringResource(R.string.plugins_section_video))
+                        }
+                        items(video, key = { it.id }, contentType = { "plugin_card" }) { cardFor(it) }
+                    }
+                    if (subs.isNotEmpty()) {
+                        item(key = "label_subtitles", contentType = "label") {
+                            PluginSectionLabel(stringResource(R.string.plugins_section_subtitles))
+                        }
+                        items(subs, key = { it.id }, contentType = { "plugin_card" }) { cardFor(it) }
+                    }
+                } else {
+                    items(visible, key = { it.id }, contentType = { "plugin_card" }) { cardFor(it) }
                 }
             }
         }
@@ -780,29 +897,13 @@ internal fun PluginsScreenContent(
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = PillShape
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            if (hasPendingUpdateBadge) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primary)
-                                )
-                            }
-                            Text(
-                                text = stringResource(R.string.plugins_catalog_label, configVersion),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
+                    if (hasPendingUpdateBadge) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
                     }
                 }
             },
@@ -835,23 +936,27 @@ internal fun PluginsScreenContent(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PluginCard(
-    plugin: AnimeSourcePlugin,
-    isDownloading: Boolean,
-    anyDownloading: Boolean,
-    downloadProgress: Float,
-    onToggle: (Boolean) -> Unit,
-    onDownload: () -> Unit,
-    onInstall: () -> Unit,
-    onUninstall: () -> Unit,
-    onUpdateDetails: () -> Unit,
-    onConfigure: () -> Unit
+private fun PluginSectionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp, top = KanimeSpacing.sm)
+    )
+}
+
+@Composable
+private fun PluginsOverview(
+    activeCount: Int,
+    total: Int,
+    configVersion: Int,
+    updates: List<AnimeSourcePlugin>,
+    onUpdateDetailsClick: (AnimeSourcePlugin) -> Unit
 ) {
     Surface(
-        shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -861,208 +966,295 @@ private fun PluginCard(
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
+                Surface(
+                    color = if (activeCount > 0) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainerHighest,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.size(44.dp)
                 ) {
-                    Surface(
-                        color = if (plugin.isInstalled && plugin.isEnabled) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest
-                        },
-                        shape = MaterialTheme.shapes.small,
-                        modifier = Modifier.size(44.dp)
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Extension,
+                            contentDescription = null,
+                            tint = if (activeCount > 0) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.plugins_overview_active, activeCount, total),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = stringResource(R.string.plugins_catalog_label, configVersion),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (updates.isNotEmpty()) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Text(
+                    text = pluralStringResource(R.plurals.plugins_updates_count, updates.size, updates.size),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+                updates.forEach { p ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = when {
-                                    plugin.isSubtitlePlugin -> Icons.Default.Subtitles
-                                    plugin.isInstalled && plugin.isEnabled -> Icons.Default.PlayCircle
-                                    else -> Icons.Default.Extension
-                                },
-                                contentDescription = null,
-                                tint = if (plugin.isInstalled && plugin.isEnabled) {
-                                    MaterialTheme.colorScheme.onPrimary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = p.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                            Text(
+                                text = stringResource(
+                                    R.string.plugins_version_upgrade,
+                                    p.installedVersion ?: p.version,
+                                    p.version
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        FilledTonalButton(
+                            onClick = { onUpdateDetailsClick(p) },
+                            shape = PillShape
+                        ) {
+                            Text(stringResource(R.string.action_update))
                         }
                     }
-                    Spacer(modifier = Modifier.width(KanimeSpacing.md))
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = plugin.name,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            val statusBg = when {
-                                plugin.hasUpdate -> MaterialTheme.colorScheme.tertiaryContainer
-                                plugin.isInstalled && plugin.isEnabled -> MaterialTheme.colorScheme.primaryContainer
-                                plugin.isInstalled -> MaterialTheme.colorScheme.surfaceContainerHighest
-                                plugin.isApkDownloaded -> MaterialTheme.colorScheme.secondaryContainer
-                                else -> MaterialTheme.colorScheme.errorContainer
-                            }
-                            val statusFg = when {
-                                plugin.hasUpdate -> MaterialTheme.colorScheme.onTertiaryContainer
-                                plugin.isInstalled && plugin.isEnabled -> MaterialTheme.colorScheme.onPrimaryContainer
-                                plugin.isInstalled -> MaterialTheme.colorScheme.onSurfaceVariant
-                                plugin.isApkDownloaded -> MaterialTheme.colorScheme.onSecondaryContainer
-                                else -> MaterialTheme.colorScheme.onErrorContainer
-                            }
-                            val statusText = when {
-                                plugin.hasUpdate -> stringResource(R.string.plugins_update_available)
-                                plugin.isInstalled && plugin.isEnabled -> stringResource(R.string.plugins_active)
-                                plugin.isInstalled -> stringResource(R.string.plugins_disabled)
-                                plugin.isApkDownloaded -> stringResource(R.string.plugins_ready)
-                                else -> stringResource(R.string.plugins_not_installed)
-                            }
-                            Surface(color = statusBg, shape = PillShape) {
-                                Text(
-                                    text = statusText,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = statusFg,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                        val meta = buildList {
-                            add("v${plugin.version}")
-                            if (plugin.apkSize.isNotBlank()) add(plugin.apkSize)
-                        }.joinToString(" · ")
-                        Text(
-                            text = meta,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PluginsEmptyState(onAddJsonClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Extension,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            modifier = Modifier.size(40.dp)
+        )
+        Text(
+            text = stringResource(R.string.plugins_empty),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        TextButton(onClick = onAddJsonClick) {
+            Text(stringResource(R.string.plugins_add_json))
+        }
+    }
+}
+
+@Composable
+private fun PluginMetaRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = KanimeSpacing.md)
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PluginCard(
+    plugin: AnimeSourcePlugin,
+    isDownloading: Boolean,
+    anyDownloading: Boolean,
+    downloadProgress: Float,
+    isTesting: Boolean,
+    testResult: Pair<Boolean, String>?,
+    onToggle: (Boolean) -> Unit,
+    onDownload: () -> Unit,
+    onInstall: () -> Unit,
+    onUninstall: () -> Unit,
+    onUpdateDetails: () -> Unit,
+    onTestConnection: () -> Unit,
+    onConfigure: () -> Unit
+) {
+    var expanded by rememberSaveable(plugin.id) { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    val isLive = plugin.isInstalled && plugin.isEnabled
+    val chevronRotation by animateFloatAsState(targetValue = if (expanded) 180f else 0f, label = "chevron")
+
+    val statusColor = when {
+        plugin.hasUpdate -> MaterialTheme.colorScheme.tertiary
+        isLive -> MaterialTheme.colorScheme.primary
+        plugin.isApkDownloaded && !plugin.isInstalled -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.outline
+    }
+    val statusText = when {
+        plugin.hasUpdate -> stringResource(R.string.plugins_update_available)
+        isLive -> stringResource(R.string.plugins_active)
+        plugin.isInstalled -> stringResource(R.string.plugins_disabled)
+        plugin.isApkDownloaded -> stringResource(R.string.plugins_ready)
+        else -> stringResource(R.string.plugins_not_installed)
+    }
+    val versionText = if (plugin.hasUpdate) {
+        stringResource(R.string.plugins_version_upgrade, plugin.installedVersion ?: plugin.version, plugin.version)
+    } else {
+        "v${plugin.installedVersion ?: plugin.version}"
+    }
+
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.animateContentSize()) {
+            // ── Header (tap to expand) ─────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(start = KanimeSpacing.lg, end = KanimeSpacing.sm, top = KanimeSpacing.md, bottom = KanimeSpacing.md),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
+            ) {
+                Surface(
+                    color = if (isLive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = when {
+                                plugin.isSubtitlePlugin -> Icons.Default.Subtitles
+                                isLive -> Icons.Default.PlayCircle
+                                else -> Icons.Default.Extension
+                            },
+                            contentDescription = null,
+                            tint = if (isLive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                Switch(
-                    checked = plugin.isInstalled && plugin.isEnabled,
-                    onCheckedChange = onToggle,
-                    enabled = plugin.isInstalled,
-                    thumbContent = if (plugin.isInstalled) {
-                        {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = plugin.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(statusColor)
+                        )
+                        Text(
+                            text = "$statusText · $versionText",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                if (plugin.isInstalled) {
+                    Switch(
+                        checked = isLive,
+                        onCheckedChange = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onToggle(it)
+                        },
+                        thumbContent = {
                             Icon(
-                                imageVector = if (plugin.isEnabled) Icons.Default.Check else Icons.Default.Close,
+                                imageVector = if (isLive) Icons.Default.Check else Icons.Default.Close,
                                 contentDescription = null,
                                 modifier = Modifier.size(SwitchDefaults.IconSize)
                             )
                         }
-                    } else null
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Default.ExpandMore,
+                    contentDescription = stringResource(if (expanded) R.string.plugins_collapse else R.string.plugins_expand),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .rotate(chevronRotation)
                 )
             }
 
-            if (plugin.capabilities.isNotEmpty()) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+            // ── Primary action (only when something needs doing) ───
+            if (plugin.hasUpdate || !plugin.isInstalled) {
+                Column(
+                    modifier = Modifier.padding(start = KanimeSpacing.lg, end = KanimeSpacing.lg, bottom = KanimeSpacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
                 ) {
-                    plugin.capabilities.forEach { cap ->
-                        Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-                            shape = PillShape
-                        ) {
-                            Text(
-                                text = cap,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
-            ) {
-                when {
-                    plugin.hasUpdate -> {
-                        Button(
+                    when {
+                        plugin.hasUpdate -> Button(
                             onClick = onUpdateDetails,
                             shape = PillShape,
-                            modifier = Modifier.weight(1f)
+                            enabled = !anyDownloading,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(stringResource(R.string.action_update))
                         }
-                        OutlinedButton(
-                            onClick = onUninstall,
-                            shape = PillShape,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(stringResource(R.string.action_uninstall))
-                        }
-                    }
 
-                    plugin.isInstalled -> {
-                        FilledTonalButton(
-                            onClick = onConfigure,
-                            shape = PillShape,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(stringResource(R.string.plugins_configure))
-                        }
-                        OutlinedButton(
-                            onClick = onUninstall,
-                            shape = PillShape,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(stringResource(R.string.action_uninstall))
-                        }
-                    }
-
-                    plugin.isApkDownloaded -> {
-                        Button(
+                        plugin.isApkDownloaded -> Button(
                             onClick = onInstall,
                             shape = PillShape,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(stringResource(R.string.action_install))
                         }
-                        OutlinedButton(
-                            onClick = onUninstall,
-                            shape = PillShape,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(stringResource(R.string.action_delete))
-                        }
-                    }
 
-                    else -> {
-                        Button(
+                        else -> Button(
                             onClick = onDownload,
                             enabled = !anyDownloading,
                             shape = PillShape,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(stringResource(if (isDownloading) R.string.plugins_downloading else R.string.action_download))
                         }
                     }
@@ -1070,7 +1262,10 @@ private fun PluginCard(
             }
 
             AnimatedVisibility(visible = isDownloading) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                    modifier = Modifier.padding(start = KanimeSpacing.lg, end = KanimeSpacing.lg, bottom = KanimeSpacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     LinearProgressIndicator(
                         progress = { downloadProgress },
                         modifier = Modifier
@@ -1084,6 +1279,119 @@ private fun PluginCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
+                }
+            }
+
+            // ── Details (expanded) ─────────────────────────────────
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    modifier = Modifier.padding(start = KanimeSpacing.lg, end = KanimeSpacing.lg, bottom = KanimeSpacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
+                ) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                    if (plugin.description.isNotBlank()) {
+                        Text(
+                            text = plugin.description,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (plugin.author.isNotBlank()) {
+                            PluginMetaRow(stringResource(R.string.plugins_label_author), plugin.author)
+                        }
+                        if (plugin.apkSize.isNotBlank()) {
+                            PluginMetaRow(stringResource(R.string.plugins_label_size), plugin.apkSize)
+                        }
+                        if (plugin.isInstalled && !plugin.installedVersion.isNullOrBlank()) {
+                            PluginMetaRow(stringResource(R.string.plugins_label_installed), "v${plugin.installedVersion}")
+                        }
+                    }
+
+                    if (plugin.capabilities.isNotEmpty()) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            plugin.capabilities.forEach { cap ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                                    shape = PillShape
+                                ) {
+                                    Text(
+                                        text = cap,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    AnimatedVisibility(visible = testResult != null) {
+                        val ok = testResult?.first == true
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = testResult?.second.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm),
+                        verticalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
+                    ) {
+                        if (plugin.isInstalled) {
+                            FilledTonalButton(
+                                onClick = onTestConnection,
+                                enabled = !isTesting,
+                                shape = PillShape
+                            ) {
+                                if (isTesting) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                } else {
+                                    Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(stringResource(if (isTesting) R.string.plugins_testing else R.string.plugins_test_connection))
+                            }
+                            if (plugin.isVideoPlugin) {
+                                FilledTonalButton(onClick = onConfigure, shape = PillShape) {
+                                    Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(stringResource(R.string.plugins_configure))
+                                }
+                            }
+                        }
+                        if (plugin.isInstalled || plugin.isApkDownloaded) {
+                            TextButton(
+                                onClick = onUninstall,
+                                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(stringResource(if (plugin.isInstalled) R.string.action_uninstall else R.string.action_delete))
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1107,6 +1415,8 @@ private fun PluginsScreenPreview() {
                 isCheckingCatalog = false,
                 downloadingPluginId = null,
                 downloadProgress = 0f,
+                testingPluginId = null,
+                testResults = emptyMap(),
                 onBackClick = {},
                 onShowReleaseNotes = {},
                 onCheckUpdates = {},
@@ -1116,6 +1426,7 @@ private fun PluginsScreenPreview() {
                 onInstallPlugin = {},
                 onUninstallPlugin = {},
                 onUpdateDetailsClick = {},
+                onTestConnection = {},
                 onConfigureClick = {}
             )
         }

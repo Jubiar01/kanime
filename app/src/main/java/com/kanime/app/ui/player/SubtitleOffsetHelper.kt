@@ -66,8 +66,8 @@ object SubtitleOffsetHelper {
      * Shifts every SRT or WebVTT cue timing line by [offsetMs].
      * Positive [offsetMs] delays captions (appear later); negative [offsetMs] advances them (appear earlier).
      */
-    fun shiftSubtitleText(content: String, offsetMs: Long): String {
-        if (offsetMs == 0L || content.isBlank()) return content
+    fun shiftSubtitleText(content: String, offsetMs: Long, scale: Double = 1.0): String {
+        if ((offsetMs == 0L && scale == 1.0) || content.isBlank()) return content
         return CUE_TIMING_REGEX.replace(content) { match ->
             val startRaw = match.groupValues[1]
             val arrow = match.groupValues[2]
@@ -78,8 +78,9 @@ object SubtitleOffsetHelper {
 
             val useComma = startRaw.contains(',')
             val includeHours = startRaw.count { it == ':' } >= 2 || endRaw.count { it == ':' } >= 2
-            val newStart = (startMs + offsetMs).coerceAtLeast(0L)
-            val newEnd = (endMs + offsetMs).coerceAtLeast(newStart + 100L)
+            // new = old * scale + offset  (scale corrects 25fps <-> 23.976fps drift)
+            val newStart = ((startMs * scale).toLong() + offsetMs).coerceAtLeast(0L)
+            val newEnd = ((endMs * scale).toLong() + offsetMs).coerceAtLeast(newStart + 100L)
 
             formatTimestampMs(newStart, useComma, includeHours) +
                 arrow +
@@ -134,19 +135,20 @@ object SubtitleOffsetHelper {
         context: Context,
         url: String,
         referer: String?,
-        offsetMs: Long
+        offsetMs: Long,
+        scale: Double = 1.0
     ): Uri {
-        if (offsetMs == 0L || url.contains(".m3u8", ignoreCase = true)) {
+        if ((offsetMs == 0L && scale == 1.0) || url.contains(".m3u8", ignoreCase = true)) {
             return Uri.parse(url)
         }
         return withContext(Dispatchers.IO) {
             val raw = downloadSubtitleText(url, referer) ?: return@withContext Uri.parse(url)
-            val shifted = shiftSubtitleText(raw, offsetMs)
+            val shifted = shiftSubtitleText(raw, offsetMs, scale)
             val isVtt = shifted.trimStart().startsWith("WEBVTT", ignoreCase = true) ||
                 url.substringBefore('?').endsWith(".vtt", ignoreCase = true)
             val ext = if (isVtt) "vtt" else "srt"
             val dir = File(context.cacheDir, "subtitles_shifted").apply { mkdirs() }
-            val file = File(dir, "sub_${url.hashCode().toUInt()}_${offsetMs}.$ext")
+            val file = File(dir, "sub_${url.hashCode().toUInt()}_${offsetMs}_${(scale * 10000).toLong()}.$ext")
             try {
                 file.writeText(shifted, Charsets.UTF_8)
                 Uri.fromFile(file)

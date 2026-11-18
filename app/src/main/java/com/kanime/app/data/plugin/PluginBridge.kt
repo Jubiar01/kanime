@@ -27,6 +27,14 @@ data class PluginSubtitle(
     val isDefault: Boolean = false
 )
 
+data class SubtitleSyncResult(
+    val ok: Boolean,
+    val offsetMs: Long,
+    val scale: Double,
+    val confidence: String, // "high" | "medium" | "low"
+    val reason: String
+)
+
 data class PluginStream(
     val embedUrl: String,
     val m3u8: String?,
@@ -171,6 +179,42 @@ object PluginBridge {
     }
 
     /**
+     * Asks the subtitle plugin to work out how early/late [url] is for the video being watched,
+     * using the AniSkip intro/outro positions (0 = unknown). Needs KOpenSubtitle 1.0.3+.
+     */
+    suspend fun analyzeSync(
+        context: Context,
+        url: String,
+        opStartMs: Long,
+        opEndMs: Long,
+        edStartMs: Long,
+        edEndMs: Long,
+        authority: String = KOPENSUBTITLE_AUTHORITY
+    ): SubtitleSyncResult? = withContext(Dispatchers.IO) {
+        try {
+            val payload = JSONObject().apply {
+                put("url", url)
+                put("opStartMs", opStartMs)
+                put("opEndMs", opEndMs)
+                put("edStartMs", edStartMs)
+                put("edEndMs", edEndMs)
+            }
+            val bundle = callProvider(context, authority, "analyzeSync", payload.toString()) ?: return@withContext null
+            if (!bundle.containsKey("confidence")) return@withContext null // older plugin without sync support
+            SubtitleSyncResult(
+                ok = bundle.getBoolean("ok", false),
+                offsetMs = bundle.getLong("offsetMs", 0L),
+                scale = bundle.getDouble("scale", 1.0),
+                confidence = bundle.getString("confidence") ?: "low",
+                reason = bundle.getString("reason") ?: ""
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "analyzeSync error on authority=$authority: ${e.message}")
+            null
+        }
+    }
+
+    /**
      * Queries an installed subtitle plugin (e.g. KOpenSubtitle) for online subtitle tracks
      * when the active video source plugin does not provide subtitles.
      */
@@ -188,6 +232,7 @@ object PluginBridge {
         mediaType: String? = null,
         episodeTitle: String? = null,
         episodeAired: String? = null,
+        runtimeMin: Int = 0,
         authority: String = KOPENSUBTITLE_AUTHORITY
     ): List<PluginSubtitle> = withContext(Dispatchers.IO) {
         try {
@@ -204,6 +249,7 @@ object PluginBridge {
                 if (!mediaType.isNullOrBlank()) put("mediaType", mediaType)
                 if (!episodeTitle.isNullOrBlank()) put("episodeTitle", episodeTitle)
                 if (!episodeAired.isNullOrBlank()) put("episodeAired", episodeAired)
+                if (runtimeMin > 0) put("runtimeMin", runtimeMin)
             }
             val bundle = callProvider(context, authority, "getSubtitles", payload.toString())
             val jsonStr = bundle?.getString("result") ?: return@withContext emptyList()

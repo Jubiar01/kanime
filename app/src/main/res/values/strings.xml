@@ -203,6 +203,25 @@
 
     <!-- Plugins & Release Notes -->
     <string name="plugins_title">Plugins</string>
+    <string name="plugins_overview_active">%1$d of %2$d active</string>
+    <string name="plugins_filter_all">All</string>
+    <string name="plugins_filter_video">Video</string>
+    <string name="plugins_filter_subtitles">Subtitles</string>
+    <string name="plugins_section_video">Video sources</string>
+    <string name="plugins_section_subtitles">Subtitles</string>
+    <string name="plugins_empty">No plugins here</string>
+    <string name="plugins_test_connection">Test</string>
+    <string name="plugins_testing">Testing…</string>
+    <string name="plugins_label_author">Author</string>
+    <string name="plugins_label_size">Size</string>
+    <string name="plugins_label_installed">Installed</string>
+    <string name="plugins_expand">Expand</string>
+    <string name="plugins_collapse">Collapse</string>
+    <string name="plugins_msg_enabled">%1$s enabled</string>
+    <string name="plugins_msg_turned_off">%1$s turned off</string>
+    <string name="plugins_uninstall_title">Uninstall %1$s?</string>
+    <string name="plugins_delete_title">Delete %1$s download?</string>
+    <string name="plugins_uninstall_body">You can install it again any time.</string>
     <plurals name="plugins_updates_count">
         <item quantity="one">%1$d update</item>
         <item quantity="other">%1$d updates</item>
