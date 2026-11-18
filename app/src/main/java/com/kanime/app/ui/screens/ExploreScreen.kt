@@ -29,15 +29,18 @@ fun ExploreScreen(
 ) {
     val isQueryActive = uiState.searchQuery.isNotBlank()
 
+    val baseCatalog = if (uiState.exploreCatalog.isNotEmpty()) uiState.exploreCatalog else viewModel.allAnime
     val displayList = if (isQueryActive) {
         uiState.searchResults
     } else {
-        viewModel.allAnime.filter { anime ->
+        baseCatalog.filter { anime ->
             val matchesGenre = uiState.selectedGenre == "All" || anime.genres.any { it.equals(uiState.selectedGenre, ignoreCase = true) }
             val matchesStatus = uiState.selectedStatus == "All" || anime.status.equals(uiState.selectedStatus, ignoreCase = true)
             matchesGenre && matchesStatus
         }
     }
+
+    val isLoading = if (isQueryActive) uiState.isSearching else uiState.isBrowsingCatalog
 
     Column(
         modifier = Modifier
@@ -51,7 +54,7 @@ fun ExploreScreen(
             value = uiState.searchQuery,
             onValueChange = { viewModel.updateSearch(it) },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Search online: Fairy Tail, Naruto, One Piece...") },
+            placeholder = { Text("Search AniList & MAL: Naruto, Frieren, One Piece...") },
             leadingIcon = {
                 Icon(Icons.Default.Search, contentDescription = "Search")
             },
@@ -124,13 +127,17 @@ fun ExploreScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (isQueryActive) "Kitsu Online Results (${displayList.size})" else "Featured Anime (${displayList.size})",
+                text = if (isQueryActive) {
+                    "${uiState.searchSource} Search Results (${displayList.size})"
+                } else {
+                    "Anime Catalog (${displayList.size})"
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            if (uiState.isSearching) {
+            if (isLoading) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(18.dp),
                     strokeWidth = 2.dp,
@@ -141,7 +148,7 @@ fun ExploreScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        if (uiState.isSearching && displayList.isEmpty()) {
+        if (isLoading && displayList.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -152,7 +159,7 @@ fun ExploreScreen(
                     CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Searching Kitsu Anime Database...",
+                        text = if (isQueryActive) "Searching AniList & MyAnimeList..." else "Loading Anime Catalog...",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -21,7 +21,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.*
+import androidx.compose.material3.* 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kanime.app.data.api.CatalogConfig
 import com.kanime.app.data.plugin.PluginManager
 import com.kanime.app.ui.screens.*
 import com.kanime.app.ui.theme.KAnimeTheme
@@ -53,7 +54,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Initial plugin status sync
+        // Initialize catalog config (TMDB API key prefs, etc.) & plugin status sync
+        CatalogConfig.init(applicationContext)
         PluginManager.checkPluginStatus(applicationContext)
 
         // Listen for real-time APK install / uninstall / update events
@@ -106,24 +108,26 @@ fun KAnimeApp(
     uiState: AnimeUiState
 ) {
     // If an episode is playing, present the full-screen player directly on the Activity window
+    val autoPlayNext by CatalogConfig.autoPlayNextFlow.collectAsState()
     val playing = uiState.playingEpisode
     if (playing != null) {
         val anime = playing.first
         val currentEp = playing.second
-        val nextEp = anime.episodeList.getOrNull(currentEp.episodeNumber)
+        val sortedEps = anime.episodeList.sortedBy { it.episodeNumber }
+        val nextEp = sortedEps.firstOrNull { it.episodeNumber > currentEp.episodeNumber }
+        val prevEp = sortedEps.lastOrNull { it.episodeNumber < currentEp.episodeNumber }
 
         PlayerDialog(
             anime = anime,
             episode = currentEp,
+            autoPlayNext = autoPlayNext,
+            onToggleAutoPlayNext = { viewModel.setAutoPlayNext(it) },
             onDismiss = { viewModel.closePlayer() },
             onNextEpisode = if (nextEp != null) {
                 { viewModel.playEpisode(anime, nextEp) }
             } else null,
-            onPreviousEpisode = if (currentEp.episodeNumber > 1) {
-                {
-                    val prevEp = anime.episodeList.getOrNull(currentEp.episodeNumber - 2)
-                    if (prevEp != null) viewModel.playEpisode(anime, prevEp)
-                }
+            onPreviousEpisode = if (prevEp != null) {
+                { viewModel.playEpisode(anime, prevEp) }
             } else null,
             onSelectEpisode = { ep ->
                 viewModel.playEpisode(anime, ep)

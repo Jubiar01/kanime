@@ -41,8 +41,8 @@ fun EpisodeCard(
         ) {
             Box(
                 modifier = Modifier
-                    .width(110.dp)
-                    .height(68.dp)
+                    .width(116.dp)
+                    .height(70.dp)
                     .clip(RoundedCornerShape(10.dp))
             ) {
                 AsyncImage(
@@ -52,7 +52,7 @@ fun EpisodeCard(
                     contentScale = ContentScale.Crop
                 )
                 Surface(
-                    color = Color.Black.copy(alpha = 0.5f),
+                    color = Color.Black.copy(alpha = 0.45f),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -71,12 +71,45 @@ fun EpisodeCard(
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                Text(
-                    text = "Episode ${episode.episodeNumber}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Episode ${episode.episodeNumber}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (episode.isFiller) {
+                        Surface(
+                            color = Color(0xFFFF9800).copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "FILLER",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFFFF9800),
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                    if (episode.isRecap) {
+                        Surface(
+                            color = Color(0xFF03A9F4).copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "RECAP",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF03A9F4),
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
                 Text(
                     text = episode.title,
                     style = MaterialTheme.typography.titleMedium,
@@ -85,10 +118,21 @@ fun EpisodeCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(2.dp))
+                val metaText = buildString {
+                    append(episode.duration)
+                    if (!episode.aired.isNullOrBlank()) {
+                        append(" • ")
+                        append(episode.aired)
+                    } else {
+                        append(" • Sub & Dub Available")
+                    }
+                }
                 Text(
-                    text = "${episode.duration} • Sub & Dub Available",
+                    text = metaText,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }

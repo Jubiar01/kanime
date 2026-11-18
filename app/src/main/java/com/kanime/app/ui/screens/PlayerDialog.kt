@@ -23,6 +23,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -35,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -71,12 +73,15 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
+import com.kanime.app.data.api.AnimeUpscalerMode
+import com.kanime.app.data.api.CatalogConfig
 import com.kanime.app.data.model.Anime
 import com.kanime.app.data.model.Episode
 import com.kanime.app.data.plugin.PluginBridge
 import com.kanime.app.data.plugin.PluginManager
 import com.kanime.app.data.plugin.PluginServer
 import com.kanime.app.data.plugin.PluginStream
+import com.kanime.app.ui.player.Anime4kVideoEffect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -101,6 +106,8 @@ private fun Context.findActivity(): Activity? {
 fun PlayerDialog(
     anime: Anime,
     episode: Episode,
+    autoPlayNext: Boolean = true,
+    onToggleAutoPlayNext: ((Boolean) -> Unit)? = null,
     onDismiss: () -> Unit,
     onNextEpisode: (() -> Unit)? = null,
     onPreviousEpisode: (() -> Unit)? = null,
@@ -125,11 +132,37 @@ fun PlayerDialog(
     var showSourceSheet by remember { mutableStateOf(false) }
     var showSpeedSheet by remember { mutableStateOf(false) }
     var showSubtitlesSheet by remember { mutableStateOf(false) }
+    var showEnhanceSheet by remember { mutableStateOf(false) }
     var subtitlesEnabled by remember { mutableStateOf(true) }
     var selectedSubtitleTrack by remember { mutableStateOf("English [CC]") }
     var autoSelectStream by remember { mutableStateOf(true) }
     var extensionSearchQuery by remember { mutableStateOf("") }
     var selectedFramework by remember { mutableStateOf("All Sources") }
+
+    // Persisted Anime4K Upscaler & Line Sharpening settings
+    val animeUpscalerMode by CatalogConfig.animeUpscalerModeFlow.collectAsState()
+    val lineSharpeningEnabled by CatalogConfig.animeLineSharpeningFlow.collectAsState()
+    val lineSharpeningStrength by CatalogConfig.animeLineSharpeningStrengthFlow.collectAsState()
+    val isVideoEnhanced = animeUpscalerMode != AnimeUpscalerMode.OFF || lineSharpeningEnabled
+    val qualityBadgeText = when {
+        animeUpscalerMode == AnimeUpscalerMode.ULTRA_4K -> "4K A4K"
+        animeUpscalerMode == AnimeUpscalerMode.FAST -> "A4K 1.5x"
+        lineSharpeningEnabled -> "SHARP"
+        else -> "1080p"
+    }
+
+    // Double-tap seek feedback state (-10s left / +10s right, accumulates on rapid taps)
+    var doubleTapSeekSide by remember { mutableStateOf<String?>(null) } // "left" or "right"
+    var doubleTapSeekSeconds by remember { mutableIntStateOf(0) }
+    var doubleTapSeekNonce by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(doubleTapSeekNonce) {
+        if (doubleTapSeekNonce > 0) {
+            delay(850)
+            doubleTapSeekSide = null
+            doubleTapSeekSeconds = 0
+        }
+    }
 
     // ExoPlayer & Aspect ratio state
     var isPlaying by remember { mutableStateOf(true) }
@@ -141,6 +174,11 @@ fun PlayerDialog(
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
     var aspectRatioToastMessage by remember { mutableStateOf<String?>(null) }
     var isEpisodeOrderReversed by remember { mutableStateOf(false) }
+
+    // Auto-Play Next Episode state (reset per episode)
+    val autoPlayTriggered = remember(anime.id, episode.episodeNumber) { mutableStateOf(false) }
+    val latestAutoPlayNext by rememberUpdatedState(autoPlayNext)
+    val latestOnNextEpisode by rememberUpdatedState(onNextEpisode)
 
     // Audio & Brightness Gestures (Image 6)
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -196,8 +234,8 @@ fun PlayerDialog(
     }
 
     // Auto-hide controls timer (5 seconds)
-    LaunchedEffect(showControls, isPlaying, isControlsLocked, showStreamsSheet, showSourceSheet, showSpeedSheet, showSubtitlesSheet) {
-        if (showControls && isPlaying && !isControlsLocked && !showStreamsSheet && !showSourceSheet && !showSpeedSheet && !showSubtitlesSheet) {
+    LaunchedEffect(showControls, isPlaying, isControlsLocked, showStreamsSheet, showSourceSheet, showSpeedSheet, showSubtitlesSheet, showEnhanceSheet) {
+        if (showControls && isPlaying && !isControlsLocked && !showStreamsSheet && !showSourceSheet && !showSpeedSheet && !showSubtitlesSheet && !showEnhanceSheet) {
             delay(5000)
             showControls = false
         }
@@ -221,8 +259,17 @@ fun PlayerDialog(
 
             resolutionState = StreamResolutionState.Loading("Resolving anime via ${activePlugin.name}...")
             try {
-                val slug = PluginBridge.findSlug(context, anime.title)
-                    ?: anime.japaneseTitle.takeIf { it.isNotBlank() }?.let { PluginBridge.findSlug(context, it) }
+                val titleCandidates = listOfNotNull(
+                    anime.englishTitle,
+                    anime.title,
+                    anime.romajiTitle,
+                    anime.japaneseTitle
+                ).map { it.trim() }.filter { it.isNotBlank() }.distinct()
+                var slug: String? = null
+                for (candidate in titleCandidates) {
+                    slug = PluginBridge.findSlug(context, candidate)
+                    if (slug != null) break
+                }
 
                 if (slug == null) {
                     resolutionState = StreamResolutionState.Error("Anime '${anime.title}' was not found in KAnikoto catalog.")
@@ -519,6 +566,23 @@ fun PlayerDialog(
                                 .setSubtitleConfigurations(subtitleConfigs)
                                 .build()
 
+                            try {
+                                val effects = if (animeUpscalerMode != AnimeUpscalerMode.OFF || lineSharpeningEnabled) {
+                                    listOf(
+                                        Anime4kVideoEffect(
+                                            mode = animeUpscalerMode,
+                                            lineSharpeningEnabled = lineSharpeningEnabled,
+                                            lineSharpeningStrength = lineSharpeningStrength
+                                        )
+                                    )
+                                } else {
+                                    emptyList()
+                                }
+                                setVideoEffects(effects)
+                            } catch (_: Throwable) {
+                                // Gracefully fall back to standard rendering if GPU effect pipeline is unavailable
+                            }
+
                             setMediaItem(mediaItem)
                             prepare()
                             playWhenReady = true
@@ -527,8 +591,69 @@ fun PlayerDialog(
                                 override fun onIsPlayingChanged(playing: Boolean) {
                                     isPlaying = playing
                                 }
+
+                                override fun onPlaybackStateChanged(playbackState: Int) {
+                                    if (playbackState == Player.STATE_ENDED) {
+                                        if (latestAutoPlayNext && latestOnNextEpisode != null && !autoPlayTriggered.value) {
+                                            autoPlayTriggered.value = true
+                                            latestOnNextEpisode?.invoke()
+                                        } else {
+                                            showControls = true
+                                        }
+                                    }
+                                }
                             })
                         }
+                }
+
+                // Live-apply Anime4K Upscaler / Line Sharpening changes mid-playback
+                var hasAppliedInitialEffects by remember(exoPlayer) { mutableStateOf(false) }
+                LaunchedEffect(exoPlayer, animeUpscalerMode, lineSharpeningEnabled, lineSharpeningStrength) {
+                    if (!hasAppliedInitialEffects) {
+                        hasAppliedInitialEffects = true
+                        return@LaunchedEffect
+                    }
+                    try {
+                        val savedPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                        val wasPlaying = exoPlayer.playWhenReady
+                        val effects = if (animeUpscalerMode != AnimeUpscalerMode.OFF || lineSharpeningEnabled) {
+                            listOf(
+                                Anime4kVideoEffect(
+                                    mode = animeUpscalerMode,
+                                    lineSharpeningEnabled = lineSharpeningEnabled,
+                                    lineSharpeningStrength = lineSharpeningStrength
+                                )
+                            )
+                        } else {
+                            emptyList()
+                        }
+                        exoPlayer.stop()
+                        exoPlayer.setVideoEffects(effects)
+                        exoPlayer.prepare()
+                        exoPlayer.seekTo(savedPos)
+                        exoPlayer.playWhenReady = wasPlaying
+                    } catch (_: Throwable) {
+                        // Ignore if device GPU cannot reconfigure video effects dynamically
+                    }
+                }
+
+                fun performDoubleTapSeek(deltaSeconds: Int) {
+                    val side = if (deltaSeconds < 0) "left" else "right"
+                    val maxDur = exoPlayer.duration.coerceAtLeast(0L)
+                    val targetMs = if (maxDur > 0L) {
+                        (exoPlayer.currentPosition + deltaSeconds * 1000L).coerceIn(0L, maxDur)
+                    } else {
+                        (exoPlayer.currentPosition + deltaSeconds * 1000L).coerceAtLeast(0L)
+                    }
+                    exoPlayer.seekTo(targetMs)
+                    currentPositionMs = targetMs
+                    doubleTapSeekSeconds = if (doubleTapSeekSide == side) {
+                        doubleTapSeekSeconds + kotlin.math.abs(deltaSeconds)
+                    } else {
+                        kotlin.math.abs(deltaSeconds)
+                    }
+                    doubleTapSeekSide = side
+                    doubleTapSeekNonce++
                 }
 
                 // Keep playback speed in sync
@@ -645,16 +770,31 @@ fun PlayerDialog(
                         ) {
                             VideoSurface(modifier = Modifier.fillMaxSize())
 
-                            // Scrim overlay to intercept clicks over VideoSurface
+                            // Scrim overlay to intercept single taps (controls) and double-taps (-10s / +10s)
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) {
-                                        showControls = !showControls
+                                    .pointerInput(exoPlayer) {
+                                        detectTapGestures(
+                                            onTap = {
+                                                showControls = !showControls
+                                            },
+                                            onDoubleTap = { offset ->
+                                                when {
+                                                    offset.x < size.width * 0.45f -> performDoubleTapSeek(-10)
+                                                    offset.x > size.width * 0.55f -> performDoubleTapSeek(+10)
+                                                    else -> if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                                }
+                                            }
+                                        )
                                     }
+                            )
+
+                            // Portrait Double-Tap Seek Feedback (-10s / +10s)
+                            DoubleTapSeekOverlay(
+                                side = doubleTapSeekSide,
+                                seconds = doubleTapSeekSeconds,
+                                compact = true
                             )
 
                             // Portrait Player Controls Overlay
@@ -700,11 +840,13 @@ fun PlayerDialog(
                                                 )
                                             }
                                             Text(
-                                                text = "1080p",
-                                                color = Color.White.copy(alpha = 0.85f),
+                                                text = qualityBadgeText,
+                                                color = if (isVideoEnhanced) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.85f),
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(end = 8.dp)
+                                                modifier = Modifier
+                                                    .clickable { showEnhanceSheet = true }
+                                                    .padding(end = 8.dp)
                                             )
                                         }
                                     }
@@ -712,7 +854,15 @@ fun PlayerDialog(
                                     // Center Play / Pause
                                     IconButton(
                                         onClick = {
-                                            if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                            if (isPlaying) {
+                                                exoPlayer.pause()
+                                            } else {
+                                                if (exoPlayer.playbackState == Player.STATE_ENDED) {
+                                                    autoPlayTriggered.value = false
+                                                    exoPlayer.seekTo(0L)
+                                                }
+                                                exoPlayer.play()
+                                            }
                                         },
                                         modifier = Modifier
                                             .size(56.dp)
@@ -832,6 +982,22 @@ fun PlayerDialog(
                                     .horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                ActionPill(
+                                    icon = Icons.Default.AutoAwesome,
+                                    label = if (isVideoEnhanced) "Anime4K: ON" else "Anime4K",
+                                    isActive = isVideoEnhanced
+                                ) {
+                                    showEnhanceSheet = true
+                                }
+                                ActionPill(
+                                    icon = Icons.Default.SkipNext,
+                                    label = if (autoPlayNext) "Auto-Play: ON" else "Auto-Play: OFF",
+                                    isActive = autoPlayNext
+                                ) {
+                                    val nextState = !autoPlayNext
+                                    onToggleAutoPlayNext?.invoke(nextState)
+                                    aspectRatioToastMessage = if (nextState) "Auto-Play Next Episode enabled" else "Auto-Play Next Episode disabled"
+                                }
                                 ActionPill(icon = Icons.Default.Speed, label = "Playback speed") {
                                     showSpeedSheet = true
                                 }
@@ -1059,13 +1225,34 @@ fun PlayerDialog(
                     ) {
                         VideoSurface(modifier = Modifier.fillMaxSize())
 
-                        // Scrim to catch drag gestures and clicks over VideoSurface
+                        // Scrim to catch vertical drag gestures, single-taps, and double-taps (-10s / +10s)
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .pointerInput(Unit) {
+                                .pointerInput(exoPlayer, isControlsLocked) {
+                                    detectTapGestures(
+                                        onTap = {
+                                            if (!isControlsLocked) {
+                                                showControls = !showControls
+                                            } else {
+                                                showControls = true
+                                            }
+                                        },
+                                        onDoubleTap = { offset ->
+                                            if (!isControlsLocked) {
+                                                when {
+                                                    offset.x < size.width * 0.45f -> performDoubleTapSeek(-10)
+                                                    offset.x > size.width * 0.55f -> performDoubleTapSeek(+10)
+                                                    else -> if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                                .pointerInput(isControlsLocked) {
                                     detectVerticalDragGestures(
                                         onDragStart = { offset ->
+                                            if (isControlsLocked) return@detectVerticalDragGestures
                                             if (offset.x < size.width * 0.45f) {
                                                 gestureType = "brightness"
                                                 gestureLevel = brightness
@@ -1075,6 +1262,7 @@ fun PlayerDialog(
                                             }
                                         },
                                         onVerticalDrag = { change, dragAmount ->
+                                            if (isControlsLocked) return@detectVerticalDragGestures
                                             change.consume()
                                             if (gestureType == "brightness") {
                                                 brightness = (brightness - (dragAmount / 350f)).coerceIn(0.01f, 1.0f)
@@ -1094,16 +1282,13 @@ fun PlayerDialog(
                                         }
                                     )
                                 }
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) {
-                                    if (!isControlsLocked) {
-                                        showControls = !showControls
-                                    } else {
-                                        showControls = true
-                                    }
-                                }
+                        )
+
+                        // Landscape Double-Tap Seek Feedback (-10s / +10s)
+                        DoubleTapSeekOverlay(
+                            side = doubleTapSeekSide,
+                            seconds = doubleTapSeekSeconds,
+                            compact = false
                         )
 
                         // ══════════════════════════════════════════════════════════════
@@ -1237,6 +1422,34 @@ fun PlayerDialog(
                                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                                             ) {
                                                 IconButton(
+                                                    onClick = { showEnhanceSheet = true },
+                                                    modifier = Modifier.size(38.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.AutoAwesome,
+                                                        contentDescription = "Anime4K Upscaler",
+                                                        tint = if (isVideoEnhanced) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.65f),
+                                                        modifier = Modifier.size(22.dp)
+                                                    )
+                                                }
+
+                                                IconButton(
+                                                    onClick = {
+                                                        val nextState = !autoPlayNext
+                                                        onToggleAutoPlayNext?.invoke(nextState)
+                                                        aspectRatioToastMessage = if (nextState) "Auto-Play: ON" else "Auto-Play: OFF"
+                                                    },
+                                                    modifier = Modifier.size(38.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.AutoMirrored.Filled.PlaylistPlay,
+                                                        contentDescription = "Auto-Play Next",
+                                                        tint = if (autoPlayNext) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.45f),
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                }
+
+                                                IconButton(
                                                     onClick = {
                                                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                                             activity?.enterPictureInPictureMode()
@@ -1278,11 +1491,13 @@ fun PlayerDialog(
                                             }
 
                                             Text(
-                                                text = "1080p",
-                                                color = Color.White.copy(alpha = 0.85f),
+                                                text = qualityBadgeText,
+                                                color = if (isVideoEnhanced) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.85f),
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(end = 8.dp)
+                                                modifier = Modifier
+                                                    .clickable { showEnhanceSheet = true }
+                                                    .padding(end = 8.dp)
                                             )
                                         }
                                     }
@@ -1309,7 +1524,15 @@ fun PlayerDialog(
                                         // Clean White Play/Pause (|| / ▶) - matching Image 4
                                         IconButton(
                                             onClick = {
-                                                if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                                if (isPlaying) {
+                                                    exoPlayer.pause()
+                                                } else {
+                                                    if (exoPlayer.playbackState == Player.STATE_ENDED) {
+                                                        autoPlayTriggered.value = false
+                                                        exoPlayer.seekTo(0L)
+                                                    }
+                                                    exoPlayer.play()
+                                                }
                                             },
                                             modifier = Modifier.size(72.dp)
                                         ) {
@@ -1580,7 +1803,7 @@ fun PlayerDialog(
         // ══════════════════════════════════════════════════════════════
         // BOTTOM SHEETS BACKDROP
         // ══════════════════════════════════════════════════════════════
-        if (showStreamsSheet || showSourceSheet || showSpeedSheet || showSubtitlesSheet) {
+        if (showStreamsSheet || showSourceSheet || showSpeedSheet || showSubtitlesSheet || showEnhanceSheet) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1591,6 +1814,7 @@ fun PlayerDialog(
                         showSourceSheet = false
                         showSpeedSheet = false
                         showSubtitlesSheet = false
+                        showEnhanceSheet = false
                     }
             )
         }
@@ -2159,6 +2383,213 @@ fun PlayerDialog(
 
                     Spacer(modifier = Modifier.height(16.dp))
                 }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // ANIME4K UPSCALER & LINE SHARPENING BOTTOM SHEET
+        // ══════════════════════════════════════════════════════════════
+        AnimatedVisibility(
+            visible = showEnhanceSheet,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .zIndex(20f)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = 600.dp)
+                    .fillMaxWidth(),
+                color = Color(0xFF1E1E24),
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                shadowElevation = 16.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(vertical = 4.dp)
+                            .size(width = 44.dp, height = 4.dp)
+                            .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+                    )
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = Color(0xFFA5B4FC),
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Anime4K & Line Sharpening",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Text(
+                        text = "GPU Upscaler Mode",
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    AnimeUpscalerMode.entries.forEach { mode ->
+                        val isSelected = animeUpscalerMode == mode
+                        Surface(
+                            onClick = {
+                                CatalogConfig.setAnimeUpscalerMode(mode)
+                                aspectRatioToastMessage = "Upscaler: ${mode.label}"
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
+                            border = if (isSelected) BorderStroke(1.dp, Color(0xFFA5B4FC)) else null,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = mode.label,
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = mode.description,
+                                        color = Color.White.copy(alpha = 0.65f),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                if (isSelected) {
+                                    Icon(
+                                        Icons.Default.CheckCircle,
+                                        contentDescription = "Selected",
+                                        tint = Color(0xFFA5B4FC),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Anime Line Sharpening",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Sobel dark-line thinning & crisp contours",
+                                color = Color.White.copy(alpha = 0.65f),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Switch(
+                            checked = lineSharpeningEnabled,
+                            onCheckedChange = {
+                                CatalogConfig.setAnimeLineSharpening(it)
+                                aspectRatioToastMessage = if (it) "Anime Line Sharpening: ON" else "Anime Line Sharpening: OFF"
+                            }
+                        )
+                    }
+
+                    if (lineSharpeningEnabled) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Sharpening Strength",
+                                    color = Color.White.copy(alpha = 0.75f),
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                                Text(
+                                    text = "${(lineSharpeningStrength * 100).toInt()}%",
+                                    color = Color(0xFFA5B4FC),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Slider(
+                                value = lineSharpeningStrength,
+                                onValueChange = { CatalogConfig.setAnimeLineSharpeningStrength(it) },
+                                valueRange = 0.15f..1.0f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color(0xFFA5B4FC),
+                                    activeTrackColor = Color(0xFFA5B4FC),
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.25f)
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.DoubleTapSeekOverlay(
+    side: String?,
+    seconds: Int,
+    compact: Boolean
+) {
+    AnimatedVisibility(
+        visible = side != null && seconds > 0,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier
+            .align(if (side == "left") Alignment.CenterStart else Alignment.CenterEnd)
+            .padding(horizontal = if (compact) 24.dp else 64.dp)
+    ) {
+        Surface(
+            color = Color.Black.copy(alpha = 0.72f),
+            shape = RoundedCornerShape(28.dp),
+            border = BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.45f))
+        ) {
+            Row(
+                modifier = Modifier.padding(
+                    horizontal = if (compact) 14.dp else 20.dp,
+                    vertical = if (compact) 10.dp else 14.dp
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = if (side == "left") Icons.Default.FastRewind else Icons.Default.FastForward,
+                    contentDescription = null,
+                    tint = Color(0xFFA5B4FC),
+                    modifier = Modifier.size(if (compact) 22.dp else 28.dp)
+                )
+                Text(
+                    text = if (side == "left") "-${seconds}s" else "+${seconds}s",
+                    color = Color.White,
+                    fontSize = if (compact) 14.sp else 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }

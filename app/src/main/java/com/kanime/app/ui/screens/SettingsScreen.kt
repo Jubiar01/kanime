@@ -1,6 +1,5 @@
 package com.kanime.app.ui.screens
 
-import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,6 +14,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.kanime.app.data.api.AnimeUpscalerMode
+import com.kanime.app.data.api.CatalogConfig
 import com.kanime.app.data.plugin.PluginManager
 import com.kanime.app.ui.viewmodel.AnimeUiState
 import com.kanime.app.ui.viewmodel.AnimeViewModel
@@ -26,6 +27,11 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val plugins by PluginManager.plugins.collectAsState()
+    val tmdbApiKey by CatalogConfig.tmdbApiKeyFlow.collectAsState()
+    val autoPlayNext by CatalogConfig.autoPlayNextFlow.collectAsState()
+    val animeUpscalerMode by CatalogConfig.animeUpscalerModeFlow.collectAsState()
+    val lineSharpeningEnabled by CatalogConfig.animeLineSharpeningFlow.collectAsState()
+    val lineSharpeningStrength by CatalogConfig.animeLineSharpeningStrengthFlow.collectAsState()
     val activePluginCount = plugins.count { it.isInstalled && it.isEnabled }
 
     LaunchedEffect(Unit) {
@@ -33,9 +39,10 @@ fun SettingsScreen(
     }
 
     var showPluginsView by remember { mutableStateOf(false) }
-    var autoPlayNext by remember { mutableStateOf(true) }
-    var streamQuality by remember { mutableStateOf("1080p FHD") }
-    var showQualityDialog by remember { mutableStateOf(false) }
+    var showTmdbDialog by remember { mutableStateOf(false) }
+    var showUpscalerDialog by remember { mutableStateOf(false) }
+    var tmdbInput by remember(tmdbApiKey) { mutableStateOf(tmdbApiKey) }
+    var cacheClearedBanner by remember { mutableStateOf(false) }
 
     if (showPluginsView) {
         BackHandler {
@@ -139,6 +146,91 @@ fun SettingsScreen(
             }
         }
 
+        // Catalog & Metadata Sources (MAL + AniList + TMDB + Kitsu)
+        item {
+            Text(
+                text = "Catalog & Art Sources",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Image, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("TMDB Primary Art API Key", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = if (tmdbApiKey.isNotBlank()) {
+                                        "Active (Posters, Logos & Episode Stills)"
+                                    } else {
+                                        "Not set — using Kitsu & AniList fallback"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                tmdbInput = tmdbApiKey
+                                showTmdbDialog = true
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(if (tmdbApiKey.isNotBlank()) "Edit" else "Set Key")
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Cached, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("Metadata & Art Cache", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = if (cacheClearedBanner) "Cache cleared" else "Cached MAL, AniList, TMDB & Kitsu responses",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                viewModel.clearCatalogCache()
+                                cacheClearedBanner = true
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Clear")
+                        }
+                    }
+                }
+            }
+        }
+
         // Appearance
         item {
             Text(
@@ -188,46 +280,147 @@ fun SettingsScreen(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Icon(Icons.Default.VideoLibrary, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text("Auto-Play Next Episode", fontWeight = FontWeight.SemiBold)
-                                Text("Continuously queue upcoming episodes", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    text = if (autoPlayNext) {
+                                        "Automatically plays the next episode when finished"
+                                    } else {
+                                        "Stops playback at the end of each episode"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
+                        Spacer(modifier = Modifier.width(8.dp))
                         Switch(
                             checked = autoPlayNext,
-                            onCheckedChange = { autoPlayNext = it }
+                            onCheckedChange = { viewModel.setAutoPlayNext(it) }
                         )
                     }
+                }
+            }
+        }
 
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-
+        // Video Enhancement (Anime4K Upscaler & Line Sharpening)
+        item {
+            Text(
+                text = "Video Enhancement (Anime4K)",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Anime4K Upscaler selector
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.HighQuality, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Preferred Stream Quality", fontWeight = FontWeight.SemiBold)
-                                Text(streamQuality, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Anime4K GPU Upscaler", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = animeUpscalerMode.label,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
+                        Spacer(modifier = Modifier.width(8.dp))
                         FilledTonalButton(
-                            onClick = { showQualityDialog = true },
+                            onClick = { showUpscalerDialog = true },
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("Change")
+                            Text("Mode")
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                    // Anime Line Sharpening switch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Brush, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("Anime Line Sharpening", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = if (lineSharpeningEnabled) {
+                                        "Sobel dark-line thinning & contour crispness (${(lineSharpeningStrength * 100).toInt()}%)"
+                                    } else {
+                                        "Crisp blurry anime ink lines without ringing artifacts"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = lineSharpeningEnabled,
+                            onCheckedChange = { viewModel.setAnimeLineSharpening(it) }
+                        )
+                    }
+
+                    // Line sharpening strength slider when enabled
+                    if (lineSharpeningEnabled) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Line Sharpening Strength",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "${(lineSharpeningStrength * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Slider(
+                                value = lineSharpeningStrength,
+                                onValueChange = { viewModel.setAnimeLineSharpeningStrength(it) },
+                                valueRange = 0.15f..1.0f,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
                 }
@@ -252,43 +445,101 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     SpecRow(icon = Icons.Default.Info, title = "Application", value = "KAnime v1.0.0")
-                    SpecRow(icon = Icons.Default.CloudSync, title = "Anime Database", value = "Kitsu Anime Live API")
-                    SpecRow(icon = Icons.Default.Language, title = "Catalog Search", value = "Worldwide Anime Index")
+                    SpecRow(icon = Icons.Default.CloudSync, title = "Metadata Engine", value = "MAL Direct + AniList")
+                    SpecRow(icon = Icons.Default.Image, title = "Art & Stills", value = "TMDB → Kitsu → AniList")
                     SpecRow(icon = Icons.Default.Speed, title = "Playback", value = "Adaptive Multi-Bitrate")
                 }
             }
         }
     }
 
-    if (showQualityDialog) {
-        val qualities = listOf("4K UHD (2160p)", "1080p FHD (High)", "720p HD", "480p SD (Data Saver)")
+    if (showTmdbDialog) {
         AlertDialog(
-            onDismissRequest = { showQualityDialog = false },
-            title = { Text("Select Stream Quality") },
+            onDismissRequest = { showTmdbDialog = false },
+            title = { Text("TMDB API Key") },
             text = {
-                Column {
-                    qualities.forEach { quality ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Enter a TMDB v3 API key to enable TMDB posters, transparent logos, backdrops, and episode stills as the primary art source. Leave blank to fall back to Kitsu and AniList automatically.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = tmdbInput,
+                        onValueChange = { tmdbInput = it },
+                        placeholder = { Text("TMDB v3 API Key") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.saveTmdbApiKey(tmdbInput)
+                    showTmdbDialog = false
+                }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTmdbDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showUpscalerDialog) {
+        AlertDialog(
+            onDismissRequest = { showUpscalerDialog = false },
+            title = { Text("Anime4K GPU Upscaler") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AnimeUpscalerMode.entries.forEach { mode ->
+                        Surface(
+                            onClick = {
+                                viewModel.setAnimeUpscalerMode(mode)
+                                showUpscalerDialog = false
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (animeUpscalerMode == mode) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            RadioButton(
-                                selected = streamQuality == quality,
-                                onClick = {
-                                    streamQuality = quality
-                                    showQualityDialog = false
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                RadioButton(
+                                    selected = animeUpscalerMode == mode,
+                                    onClick = {
+                                        viewModel.setAnimeUpscalerMode(mode)
+                                        showUpscalerDialog = false
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = mode.label,
+                                        fontWeight = FontWeight.SemiBold,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        text = mode.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(quality)
+                            }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showQualityDialog = false }) {
+                TextButton(onClick = { showUpscalerDialog = false }) {
                     Text("Close")
                 }
             }

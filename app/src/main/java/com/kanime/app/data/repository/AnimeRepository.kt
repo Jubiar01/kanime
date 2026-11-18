@@ -1,8 +1,15 @@
 package com.kanime.app.data.repository
 
-import com.kanime.app.data.api.KitsuAnimeApi
+import com.kanime.app.data.api.AnimeCatalogService
 import com.kanime.app.data.model.Anime
 import com.kanime.app.data.model.Episode
+import com.kanime.app.data.model.MalCharacter
+import com.kanime.app.data.model.MalCharacterDetails
+import com.kanime.app.data.model.MalLink
+import com.kanime.app.data.model.MalPicture
+import com.kanime.app.data.model.MalRecommendation
+import com.kanime.app.data.model.MalThemes
+import com.kanime.app.data.model.MalVideos
 
 object AnimeRepository {
 
@@ -38,7 +45,8 @@ object AnimeRepository {
             episodeList = generateEpisodes("fairy_tail_2018", 25, "Fairy Tail"),
             isTrending = true,
             isTopAiring = false,
-            isSeasonal = true
+            isSeasonal = true,
+            malId = 35972
         ),
         Anime(
             id = "solo_leveling",
@@ -58,7 +66,8 @@ object AnimeRepository {
             episodeList = generateEpisodes("solo_leveling", 12, "Solo Leveling"),
             isTrending = true,
             isTopAiring = true,
-            isSeasonal = true
+            isSeasonal = true,
+            malId = 52299
         ),
         Anime(
             id = "frieren",
@@ -78,7 +87,8 @@ object AnimeRepository {
             episodeList = generateEpisodes("frieren", 28, "Frieren"),
             isTrending = true,
             isTopAiring = false,
-            isSeasonal = false
+            isSeasonal = false,
+            malId = 52991
         ),
         Anime(
             id = "jujutsu_kaisen",
@@ -98,7 +108,8 @@ object AnimeRepository {
             episodeList = generateEpisodes("jujutsu_kaisen", 24, "Jujutsu Kaisen"),
             isTrending = true,
             isTopAiring = false,
-            isSeasonal = false
+            isSeasonal = false,
+            malId = 40748
         ),
         Anime(
             id = "dandadan",
@@ -118,7 +129,8 @@ object AnimeRepository {
             episodeList = generateEpisodes("dandadan", 12, "Dandadan"),
             isTrending = true,
             isTopAiring = true,
-            isSeasonal = true
+            isSeasonal = true,
+            malId = 57334
         ),
         Anime(
             id = "demon_slayer",
@@ -138,7 +150,8 @@ object AnimeRepository {
             episodeList = generateEpisodes("demon_slayer", 12, "Demon Slayer"),
             isTrending = false,
             isTopAiring = true,
-            isSeasonal = true
+            isSeasonal = true,
+            malId = 38000
         ),
         Anime(
             id = "chainsaw_man",
@@ -158,7 +171,8 @@ object AnimeRepository {
             episodeList = generateEpisodes("chainsaw_man", 12, "Chainsaw Man"),
             isTrending = true,
             isTopAiring = false,
-            isSeasonal = true
+            isSeasonal = true,
+            malId = 44511
         ),
         Anime(
             id = "oshi_no_ko",
@@ -178,7 +192,8 @@ object AnimeRepository {
             episodeList = generateEpisodes("oshi_no_ko", 24, "Oshi no Ko"),
             isTrending = false,
             isTopAiring = false,
-            isSeasonal = false
+            isSeasonal = false,
+            malId = 52034
         ),
         Anime(
             id = "bleach_tybw",
@@ -198,33 +213,76 @@ object AnimeRepository {
             episodeList = generateEpisodes("bleach_tybw", 13, "Bleach TYBW"),
             isTrending = true,
             isTopAiring = true,
-            isSeasonal = true
+            isSeasonal = true,
+            malId = 41467
         )
     )
 
     val genres: List<String> = listOf(
-        "All", "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Magic", "Sci-Fi", "Supernatural", "Shounen", "Mystery"
+        "All", "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror",
+        "Mecha", "Music", "Mystery", "Psychological", "Romance", "Sci-Fi",
+        "Slice of Life", "Sports", "Supernatural", "Thriller"
     )
 
-    suspend fun searchOnline(query: String): List<Anime> {
-        val onlineResults = KitsuAnimeApi.searchAnime(query)
-        if (onlineResults.isNotEmpty()) {
-            return onlineResults
+    suspend fun searchOnlineWithSource(query: String): AnimeCatalogService.CatalogSearchResult {
+        val result = AnimeCatalogService.searchAnime(query)
+        if (result.results.isNotEmpty()) {
+            return result
         }
-        // Fallback to local filter if network request returned empty or failed
-        return sampleAnimes.filter {
+        val fallback = sampleAnimes.filter {
             it.title.contains(query, ignoreCase = true) ||
             it.japaneseTitle.contains(query, ignoreCase = true)
         }
+        return AnimeCatalogService.CatalogSearchResult(fallback, "Offline")
+    }
+
+    suspend fun searchOnline(query: String): List<Anime> {
+        return searchOnlineWithSource(query).results
     }
 
     suspend fun getTrending(): List<Anime> {
-        val online = KitsuAnimeApi.getTrending(15)
+        val online = AnimeCatalogService.getTrending(20)
         return if (online.isNotEmpty()) online else sampleAnimes.filter { it.isTrending }
     }
 
     suspend fun getTopAiring(): List<Anime> {
-        val online = KitsuAnimeApi.getTopAiring(15)
+        val online = AnimeCatalogService.getTopAiring(20)
         return if (online.isNotEmpty()) online else sampleAnimes.filter { it.isTopAiring }
     }
+
+    suspend fun getSeasonal(): List<Anime> {
+        val online = AnimeCatalogService.getSeasonal(30)
+        return if (online.isNotEmpty()) online else sampleAnimes.filter { it.isSeasonal }
+    }
+
+    suspend fun browseCatalog(genre: String, status: String): List<Anime> {
+        val online = AnimeCatalogService.browseCatalog(genre = genre, status = status, limit = 30)
+        if (online.isNotEmpty()) return online
+        return sampleAnimes.filter { anime ->
+            val matchesGenre = genre == "All" || anime.genres.any { it.equals(genre, ignoreCase = true) }
+            val matchesStatus = status == "All" || anime.status.equals(status, ignoreCase = true)
+            matchesGenre && matchesStatus
+        }
+    }
+
+    suspend fun enrichAnimeDetails(anime: Anime): Anime =
+        AnimeCatalogService.enrichAnimeDetails(anime)
+
+    suspend fun getAnimeByMalId(malId: Int, fallbackTitle: String, fallbackImage: String?): Anime =
+        AnimeCatalogService.getAnimeByMalId(malId, fallbackTitle, fallbackImage)
+
+    suspend fun getResolvedEpisodes(anime: Anime): List<Episode> =
+        AnimeCatalogService.getResolvedEpisodes(anime)
+
+    suspend fun getCharacters(malId: Int): List<MalCharacter> =
+        AnimeCatalogService.getCharacters(malId)
+
+    suspend fun getCharacterDetails(characterId: Int): Pair<MalCharacterDetails?, List<MalPicture>> =
+        AnimeCatalogService.getCharacterDetails(characterId)
+
+    suspend fun loadMediaExtras(malId: Int): Triple<MalThemes, MalVideos, List<MalPicture>> =
+        AnimeCatalogService.loadMediaExtras(malId)
+
+    suspend fun loadMoreExtras(malId: Int): Triple<List<MalRecommendation>, List<MalLink>, List<MalLink>> =
+        AnimeCatalogService.loadMoreExtras(malId)
 }

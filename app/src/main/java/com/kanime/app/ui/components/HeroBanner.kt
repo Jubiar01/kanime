@@ -98,15 +98,27 @@ fun HeroBanner(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // Title
-                Text(
-                    text = anime.title,
-                    color = Color.White,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                // Title or TMDB transparent logo
+                if (!anime.logoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = anime.logoUrl,
+                        contentDescription = anime.title,
+                        modifier = Modifier
+                            .height(50.dp)
+                            .widthIn(max = 220.dp),
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.CenterStart
+                    )
+                } else {
+                    Text(
+                        text = anime.title,
+                        color = Color.White,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
                 // Rating & Metadata
                 Row(
