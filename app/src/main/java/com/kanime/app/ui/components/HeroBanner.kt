@@ -1,5 +1,6 @@
 package com.kanime.app.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -7,46 +8,75 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Devices
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.kanime.app.R
 import com.kanime.app.data.model.Anime
+import com.kanime.app.data.repository.AnimeRepository
+import com.kanime.app.ui.theme.KAnimeTheme
+import com.kanime.app.ui.theme.KanimeGlass
+import com.kanime.app.ui.theme.KanimeSpacing
+import com.kanime.app.ui.theme.KanimeWindowWidthSizeClass
+import com.kanime.app.ui.theme.LocalWindowSizeClass
+import com.kanime.app.ui.theme.PillShape
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 
 /**
- * Smooth GPU-accelerated Top 10 Popular This Season hero carousel.
- * All scroll-driven scale, alpha, and subtle banner parallax animations run exclusively inside
- * [graphicsLayer] (draw phase) with zero recomposition/relayout during swipes.
+ * Minimalist editorial Hero Carousel with GPU-only scroll parallax and
+ * mode-adaptive scrim + liquid glass controls.
  */
 @Composable
 fun HeroBannerCarousel(
@@ -58,16 +88,16 @@ fun HeroBannerCarousel(
 ) {
     if (animes.isEmpty()) return
 
+    val windowSize = LocalWindowSizeClass.current
     val items = remember(animes) { animes.take(10) }
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { items.size })
     val isDragged by pagerState.interactionSource.collectIsDraggedAsState()
     val coroutineScope = rememberCoroutineScope()
 
-    // Smooth auto-advance that pauses immediately while the user drags or flings
     LaunchedEffect(items.size, isDragged) {
         if (items.size <= 1 || isDragged) return@LaunchedEffect
         while (true) {
-            delay(5_800L)
+            delay(6_000L)
             if (!pagerState.isScrollInProgress && items.size > 1) {
                 val nextPage = (pagerState.currentPage + 1) % items.size
                 pagerState.animateScrollToPage(
@@ -81,14 +111,20 @@ fun HeroBannerCarousel(
         }
     }
 
+    val horizontalPadding = when (windowSize.widthSizeClass) {
+        KanimeWindowWidthSizeClass.Compact -> KanimeSpacing.lg
+        KanimeWindowWidthSizeClass.Medium -> KanimeSpacing.xl
+        KanimeWindowWidthSizeClass.Expanded -> KanimeSpacing.xxl
+    }
+
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         HorizontalPager(
             state = pagerState,
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            pageSpacing = 12.dp,
+            contentPadding = PaddingValues(horizontal = horizontalPadding),
+            pageSpacing = KanimeSpacing.md,
             beyondViewportPageCount = 1,
             flingBehavior = PagerDefaults.flingBehavior(
                 state = pagerState,
@@ -112,70 +148,55 @@ fun HeroBannerCarousel(
                     .graphicsLayer {
                         val rawOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
                         val absOffset = rawOffset.absoluteValue.coerceIn(0f, 1f)
-                        val scale = lerp(0.95f, 1.0f, 1f - absOffset)
+                        val scale = lerp(0.96f, 1.0f, 1f - absOffset)
                         scaleX = scale
                         scaleY = scale
-                        alpha = lerp(0.72f, 1.0f, 1f - absOffset)
+                        alpha = lerp(0.78f, 1.0f, 1f - absOffset)
                     }
             )
         }
 
         if (items.size > 1) {
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(KanimeSpacing.md))
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    repeat(items.size) { idx ->
-                        val isSelected = pagerState.currentPage == idx
-                        val dotWidth by animateDpAsState(
-                            targetValue = if (isSelected) 24.dp else 6.dp,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                stiffness = Spring.StiffnessMediumLow
-                            ),
-                            label = "BannerDotWidth"
-                        )
-                        Box(
-                            modifier = Modifier
-                                .height(5.dp)
-                                .width(dotWidth)
-                                .clip(CircleShape)
-                                .background(
-                                    if (isSelected) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.28f)
-                                    }
-                                )
-                                .clickable {
-                                    coroutineScope.launch {
-                                        pagerState.animateScrollToPage(
-                                            page = idx,
-                                            animationSpec = tween(
-                                                durationMillis = 480,
-                                                easing = FastOutSlowInEasing
-                                            )
-                                        )
-                                    }
+                repeat(items.size) { idx ->
+                    val isSelected = pagerState.currentPage == idx
+                    val dotWidth by animateDpAsState(
+                        targetValue = if (isSelected) 22.dp else 6.dp,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        label = "BannerDotWidth"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .height(5.dp)
+                            .width(dotWidth)
+                            .clip(CircleShape)
+                            .background(
+                                if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.outlineVariant
                                 }
-                        )
-                    }
+                            )
+                            .clickable {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(
+                                        page = idx,
+                                        animationSpec = tween(
+                                            durationMillis = 480,
+                                            easing = FastOutSlowInEasing
+                                        )
+                                    )
+                                }
+                            }
+                    )
                 }
-
-                Text(
-                    text = String.format("%02d / %02d", pagerState.currentPage + 1, items.size),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
-                )
             }
         }
     }
@@ -189,9 +210,20 @@ fun HeroBanner(
     onToggleWatchlist: () -> Unit,
     modifier: Modifier = Modifier,
     rank: Int? = null,
-    pageOffsetProvider: (() -> Float)? = null,
+    pageOffsetProvider: (() -> Float)? = null
 ) {
     val context = LocalContext.current
+    val glass = KanimeGlass.tokens
+    val colorScheme = MaterialTheme.colorScheme
+    val windowSize = LocalWindowSizeClass.current
+    val cardShape = MaterialTheme.shapes.extraLarge
+
+    val bannerHeight = when {
+        windowSize.widthSizeClass == KanimeWindowWidthSizeClass.Expanded -> 380.dp
+        windowSize.isLandscape -> 280.dp
+        else -> 340.dp
+    }
+
     val bannerModel = remember(anime.bannerUrl, anime.coverUrl) {
         val url = anime.bannerUrl.ifBlank { anime.coverUrl }
         ImageRequest.Builder(context)
@@ -199,298 +231,184 @@ fun HeroBanner(
             .crossfade(240)
             .build()
     }
-    val verticalScrim = remember {
+
+    // Bottom scrim fades cleanly into background so onSurface text achieves > 10:1 contrast in both modes
+    val bottomScrim = remember(colorScheme.background) {
         Brush.verticalGradient(
-            0.0f to Color(0xFF0A0C14).copy(alpha = 0.42f),
-            0.26f to Color.Transparent,
-            0.52f to Color(0xFF0A0C14).copy(alpha = 0.48f),
-            0.78f to Color(0xFF0A0C14).copy(alpha = 0.88f),
-            1.0f to Color(0xFF0A0C14).copy(alpha = 0.98f)
-        )
-    }
-    val sideScrim = remember {
-        Brush.horizontalGradient(
-            0.0f to Color(0xFF0A0C14).copy(alpha = 0.50f),
-            0.55f to Color.Transparent,
-            1.0f to Color(0xFF0A0C14).copy(alpha = 0.18f)
+            0.0f to Color.Transparent,
+            0.38f to Color.Transparent,
+            0.66f to colorScheme.background.copy(alpha = 0.72f),
+            0.86f to colorScheme.background.copy(alpha = 0.94f),
+            1.0f to colorScheme.background
         )
     }
 
-    val statusDotColor = when {
-        anime.status.contains("Air", ignoreCase = true) -> Color(0xFF22C55E)
-        anime.status.contains("Upcom", ignoreCase = true) -> Color(0xFF08D9D6)
-        else -> Color(0xFFA5B4FC)
-    }
-
-    Card(
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(352.dp)
-            .clickable(onClick = onWatchClick),
-        shape = RoundedCornerShape(26.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+            .height(bannerHeight)
+            .shadow(
+                elevation = glass.shadowElevation,
+                shape = cardShape,
+                ambientColor = glass.shadowColor,
+                spotColor = glass.shadowColor
+            )
+            .clip(cardShape)
+            .background(colorScheme.surfaceContainerHigh)
+            .border(BorderStroke(1.dp, glass.borderBrush), cardShape)
+            .clickable(onClick = onWatchClick)
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            // Subtle GPU-only parallax on the hero artwork
-            AsyncImage(
-                model = bannerModel,
-                contentDescription = anime.title,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val offset = pageOffsetProvider?.invoke() ?: 0f
-                        scaleX = 1.09f
-                        scaleY = 1.09f
-                        translationX = (-offset * 38.dp.toPx()).coerceIn(-52f, 52f)
-                    },
-                contentScale = ContentScale.Crop
-            )
+        AsyncImage(
+            model = bannerModel,
+            contentDescription = anime.title,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val offset = pageOffsetProvider?.invoke() ?: 0f
+                    scaleX = 1.08f
+                    scaleY = 1.08f
+                    translationX = (-offset * 34.dp.toPx()).coerceIn(-48f, 48f)
+                },
+            contentScale = ContentScale.Crop
+        )
 
-            // Dual-layer cinematic scrim for crisp readability on any frame
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(sideScrim)
-                    .background(verticalScrim)
-            )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(bottomScrim)
+        )
 
-            // Top Floating Metadata Row: Rank (left) + Score & Status (right)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.TopCenter)
-                    .padding(horizontal = 14.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (rank != null) {
-                    val isTopThree = rank <= 3
-                    Surface(
-                        color = if (isTopThree) {
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.90f)
-                        } else {
-                            Color(0xFF0E111B).copy(alpha = 0.72f)
-                        },
-                        shape = RoundedCornerShape(100.dp),
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = Color.White.copy(alpha = if (isTopThree) 0.34f else 0.18f)
-                        )
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
-                        ) {
-                            Text(
-                                text = "#$rank",
-                                color = if (isTopThree) Color(0xFFFFE082) else Color(0xFFA5B4FC),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Black
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "TOP SEASONAL",
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.6.sp
-                            )
-                        }
-                    }
-                } else {
-                    Spacer(modifier = Modifier.width(1.dp))
+        // Minimal top floating pills: Rank (optional) & Score
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .padding(KanimeSpacing.lg),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (rank != null) {
+                GlassSurface(
+                    shape = PillShape,
+                    overMedia = true,
+                    showShadow = false
+                ) {
+                    Text(
+                        text = "#$rank",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
                 }
+            } else {
+                Spacer(modifier = Modifier.width(1.dp))
+            }
 
-                // Glassmorphic Status + Rating pill
-                Surface(
-                    color = Color(0xFF0E111B).copy(alpha = 0.72f),
-                    shape = RoundedCornerShape(100.dp),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f))
+            if (anime.score > 0.0) {
+                GlassSurface(
+                    shape = PillShape,
+                    overMedia = true,
+                    showShadow = false
                 ) {
                     Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(statusDotColor)
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = null,
+                            tint = colorScheme.tertiary,
+                            modifier = Modifier.size(13.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = anime.status.uppercase(),
-                            color = Color.White.copy(alpha = 0.92f),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold
+                            text = String.format("%.1f", anime.score),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colorScheme.onSurface
                         )
-                        if (anime.score > 0.0) {
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Box(
-                                modifier = Modifier
-                                    .width(1.dp)
-                                    .height(10.dp)
-                                    .background(Color.White.copy(alpha = 0.25f))
-                            )
-                            Spacer(modifier = Modifier.width(7.dp))
-                            Icon(
-                                imageVector = Icons.Default.Star,
-                                contentDescription = null,
-                                tint = Color(0xFFFFB400),
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                text = String.format("%.1f", anime.score),
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
                     }
                 }
             }
+        }
 
-            // Bottom Cinematic Content Stack
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomStart)
-                    .padding(horizontal = 18.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+        // Bottom Editorial Content Stack: Title + 1-line Meta + Play/Save Actions
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomStart)
+                .padding(KanimeSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
+        ) {
+            Text(
+                text = anime.title,
+                style = MaterialTheme.typography.headlineMedium,
+                color = colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            val metaLine = remember(anime.year, anime.episodes, anime.genres) {
+                buildList {
+                    if (anime.year > 0) add(anime.year.toString())
+                    if (anime.episodes > 0) add("${anime.episodes} Ep")
+                    anime.genres.take(2).forEach { g ->
+                        if (g.isNotBlank()) add(g)
+                    }
+                }.joinToString(" · ")
+            }
+            if (metaLine.isNotBlank()) {
+                Text(
+                    text = metaLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Row(
+                modifier = Modifier.widthIn(max = 360.dp),
+                horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.md),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Title or transparent TMDB logo
-                if (!anime.logoUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = anime.logoUrl,
-                        contentDescription = anime.title,
-                        modifier = Modifier
-                            .height(54.dp)
-                            .widthIn(max = 240.dp),
-                        contentScale = ContentScale.Fit,
-                        alignment = Alignment.CenterStart
-                    )
-                } else {
-                    Text(
-                        text = anime.title,
-                        color = Color.White,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                GlassButton(
+                    text = stringResource(R.string.hero_play),
+                    icon = Icons.Default.PlayArrow,
+                    style = GlassButtonStyle.Primary,
+                    onClick = onWatchClick,
+                    modifier = Modifier.weight(1f)
+                )
 
-                // Compact Metadata Line (Season/Year • Episodes • Genres)
-                val metaParts = remember(anime.season, anime.year, anime.episodes, anime.genres) {
-                    buildList {
-                        val seasonYear = "${anime.season} ${anime.year}".trim()
-                        if (seasonYear.isNotBlank() && anime.year > 0) add(seasonYear)
-                        if (anime.episodes > 0) add("${anime.episodes} Eps")
-                        anime.genres.take(3).forEach { g ->
-                            if (g.isNotBlank()) add(g)
-                        }
-                    }
-                }
-                if (metaParts.isNotEmpty()) {
-                    Text(
-                        text = metaParts.joinToString("  •  "),
-                        color = Color.White.copy(alpha = 0.86f),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                GlassButton(
+                    text = stringResource(if (isInWatchlist) R.string.hero_saved else R.string.hero_save),
+                    icon = if (isInWatchlist) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                    style = if (isInWatchlist) GlassButtonStyle.Tonal else GlassButtonStyle.Glass,
+                    onClick = onToggleWatchlist
+                )
+            }
+        }
+    }
+}
 
-                // Clean 2-line synopsis teaser
-                val cleanSynopsis = remember(anime.synopsis) {
-                    anime.synopsis.replace(Regex("\\s+"), " ").trim()
-                }
-                if (cleanSynopsis.isNotBlank()) {
-                    Text(
-                        text = cleanSynopsis,
-                        color = Color.White.copy(alpha = 0.72f),
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        lineHeight = 17.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                // Action CTAs: Primary Watch Now + Glassmorphic My List
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Button(
-                        onClick = onWatchClick,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(46.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Watch Now",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Surface(
-                        onClick = onToggleWatchlist,
-                        shape = RoundedCornerShape(14.dp),
-                        color = if (isInWatchlist) {
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)
-                        } else {
-                            Color.White.copy(alpha = 0.14f)
-                        },
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = if (isInWatchlist) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
-                            } else {
-                                Color.White.copy(alpha = 0.28f)
-                            }
-                        ),
-                        modifier = Modifier.height(46.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = if (isInWatchlist) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                                contentDescription = "Watchlist",
-                                tint = if (isInWatchlist) MaterialTheme.colorScheme.primary else Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isInWatchlist) "In List" else "My List",
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
+@Preview(name = "HeroBanner Light Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.PHONE)
+@Preview(name = "HeroBanner Dark Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, device = Devices.PHONE)
+@Preview(name = "HeroBanner Light Tablet", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.TABLET)
+@Composable
+private fun HeroBannerPreview() {
+    KAnimeTheme(animateTransition = false) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            Box(modifier = Modifier.padding(16.dp)) {
+                HeroBanner(
+                    anime = AnimeRepository.sampleAnimes.first(),
+                    rank = 1,
+                    isInWatchlist = false,
+                    onWatchClick = {},
+                    onToggleWatchlist = {}
+                )
             }
         }
     }

@@ -2,57 +2,129 @@ package com.kanime.app.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.displayCutoutPadding
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.ExtensionOff
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Devices
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.kanime.app.R
 import com.kanime.app.data.model.Anime
+import com.kanime.app.data.model.AnimeExtras
 import com.kanime.app.data.model.Episode
 import com.kanime.app.data.model.MalCharacter
+import com.kanime.app.data.model.MalCharacterDetails
 import com.kanime.app.data.model.MalLink
+import com.kanime.app.data.model.MalPicture
 import com.kanime.app.data.model.MalRecommendation
 import com.kanime.app.data.model.MalTheme
 import com.kanime.app.data.model.MalVideo
 import com.kanime.app.data.plugin.AnimeSourcePlugin
 import com.kanime.app.data.plugin.PluginBridge
 import com.kanime.app.data.plugin.PluginManager
+import com.kanime.app.data.repository.AnimeRepository
+import com.kanime.app.ui.components.EmptyStateView
 import com.kanime.app.ui.components.EpisodeCard
+import com.kanime.app.ui.components.GlassButton
+import com.kanime.app.ui.components.GlassButtonStyle
+import com.kanime.app.ui.components.GlassChip
+import com.kanime.app.ui.components.GlassIconButton
+import com.kanime.app.ui.components.GlassSheet
+import com.kanime.app.ui.components.GlassSurface
+import com.kanime.app.ui.components.ShimmerBox
+import com.kanime.app.ui.theme.KAnimeTheme
+import com.kanime.app.ui.theme.KanimeAmbientBackdrop
+import com.kanime.app.ui.theme.KanimeSpacing
+import com.kanime.app.ui.theme.LocalWindowSizeClass
+import com.kanime.app.ui.theme.PillShape
 import com.kanime.app.ui.viewmodel.AnimeUiState
 import com.kanime.app.ui.viewmodel.AnimeViewModel
 import kotlinx.coroutines.launch
 
-private sealed interface SourceAvailabilityState {
+internal sealed interface SourceAvailabilityState {
     data class Checking(val pluginName: String) : SourceAvailabilityState
     data class Available(val pluginName: String, val episodeCount: Int) : SourceAvailabilityState
     data class Unavailable(
@@ -78,7 +150,6 @@ private fun openExternalUrl(context: Context, url: String) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DetailScreen(
     anime: Anime,
@@ -88,13 +159,10 @@ fun DetailScreen(
 ) {
     val context = LocalContext.current
     var selectedTab by remember(anime.id) { mutableIntStateOf(0) }
-    var isSynopsisExpanded by remember(anime.id) { mutableStateOf(false) }
     val isInWatchlist = uiState.watchlistIds.contains(anime.id)
     val coroutineScope = rememberCoroutineScope()
 
     var pluginEpisodes by remember(anime.id) { mutableStateOf<List<Episode>?>(null) }
-    var isLoadingPluginEpisodes by remember(anime.id) { mutableStateOf(false) }
-
     val availablePlugins by PluginManager.plugins.collectAsState()
     val activeSourceId by PluginManager.activeSourceId.collectAsState()
 
@@ -108,20 +176,18 @@ fun DetailScreen(
             ?.removeSuffix(" Extractor")
             ?.trim()
             ?.ifBlank { activePlugin.name }
-            ?: "No Plugin"
+            ?: "None"
     }
 
     val pluginLookupCache = remember(anime.id) { mutableMapOf<String, CachedPluginLookup>() }
 
     var sourceAvailability by remember(anime.id) {
         mutableStateOf<SourceAvailabilityState>(
-            SourceAvailabilityState.Checking(activePlugin?.name ?: "Source Plugin")
+            SourceAvailabilityState.Checking(activePlugin?.name ?: "Source")
         )
     }
 
     var showSourceSheet by remember { mutableStateOf(false) }
-    var extensionSearchQuery by remember { mutableStateOf("") }
-    var selectedFramework by remember { mutableStateOf("All Sources") }
 
     suspend fun fetchPluginEpisodes(forceRefresh: Boolean = false) {
         val currentPlugin = availablePlugins.firstOrNull { it.id == activeSourceId }
@@ -130,17 +196,15 @@ fun DetailScreen(
 
         if (currentPlugin == null || !currentPlugin.isInstalled) {
             pluginEpisodes = null
-            isLoadingPluginEpisodes = false
             sourceAvailability = SourceAvailabilityState.NoActivePlugin(
-                "${currentPlugin?.name ?: "Source plugin"} is not installed. Select or install a source plugin in Settings → Video Source Plugins."
+                "${currentPlugin?.name ?: "Source plugin"} is not installed."
             )
             return
         }
         if (!currentPlugin.isEnabled) {
             pluginEpisodes = null
-            isLoadingPluginEpisodes = false
             sourceAvailability = SourceAvailabilityState.NoActivePlugin(
-                "${currentPlugin.name} is turned off. Enable it or switch to another installed plugin."
+                "${currentPlugin.name} is turned off."
             )
             return
         }
@@ -163,14 +227,12 @@ fun DetailScreen(
                 if (alreadyFound || noNewTitles) {
                     pluginEpisodes = cached.episodes
                     sourceAvailability = cached.availability
-                    isLoadingPluginEpisodes = false
                     return
                 }
             }
         }
 
         pluginEpisodes = null
-        isLoadingPluginEpisodes = true
         sourceAvailability = SourceAvailabilityState.Checking(currentPlugin.name)
         try {
             val authority = currentPlugin.providerAuthority
@@ -209,7 +271,6 @@ fun DetailScreen(
                     checkedTitles = titleSet
                 )
             } else {
-                // Not available on the currently selected plugin — check other installed plugins (reusing cache first)
                 val otherInstalled = availablePlugins.filter {
                     it.isInstalled && it.isEnabled && it.id != currentPlugin.id
                 }
@@ -237,7 +298,7 @@ fun DetailScreen(
 
                 val unavailState = SourceAvailabilityState.Unavailable(
                     pluginName = currentPlugin.name,
-                    reason = "'${anime.title}' has no episodes available on ${currentPlugin.name}.",
+                    reason = "'${anime.title}' is unavailable on ${currentPlugin.name}.",
                     verifiedAlternatives = verifiedAlts,
                     otherInstalledPlugins = otherInstalled
                 )
@@ -257,16 +318,13 @@ fun DetailScreen(
             pluginEpisodes = null
             sourceAvailability = SourceAvailabilityState.Unavailable(
                 pluginName = currentPlugin.name,
-                reason = "Could not load episodes from ${currentPlugin.name}. Try switching to another source plugin.",
+                reason = "Could not load from ${currentPlugin.name}.",
                 verifiedAlternatives = emptyList(),
                 otherInstalledPlugins = otherInstalled
             )
-        } finally {
-            isLoadingPluginEpisodes = false
         }
     }
 
-    // Fetch real playable episode list once per (anime, active plugin); avoids spurious refetches on list/metadata updates
     LaunchedEffect(
         anime.id,
         activePlugin?.id,
@@ -278,7 +336,6 @@ fun DetailScreen(
         fetchPluginEpisodes(forceRefresh = false)
     }
 
-    // Lazily load MAL tab data when the user switches to Cast / Media / Info
     LaunchedEffect(selectedTab, anime.id, anime.malId) {
         when (selectedTab) {
             1 -> viewModel.loadCharactersForSelected()
@@ -287,7 +344,6 @@ fun DetailScreen(
         }
     }
 
-    // Merge active plugin playable episodes with MAL/TMDB/Kitsu/AniList episode metadata & stills
     val catalogByNum = remember(anime.episodeList) {
         anime.episodeList.associateBy { it.episodeNumber }
     }
@@ -313,1078 +369,918 @@ fun DetailScreen(
         anime.copy(episodeList = displayEpisodes)
     }
 
-    val extras = uiState.selectedAnimeExtras
+    DetailScreenContent(
+        anime = anime,
+        displayEpisodes = displayEpisodes,
+        isInWatchlist = isInWatchlist,
+        isLoadingDetails = uiState.isLoadingDetails,
+        isLoadingExtras = uiState.isLoadingExtras,
+        extras = uiState.selectedAnimeExtras,
+        selectedTab = selectedTab,
+        onSelectTab = { selectedTab = it },
+        sourceAvailability = sourceAvailability,
+        activeSourceShortName = activeSourceShortName,
+        availablePlugins = availablePlugins,
+        activeSourceId = activeSourceId,
+        showSourceSheet = showSourceSheet,
+        onShowSourceSheet = { showSourceSheet = it },
+        showCharacterSheet = uiState.showCharacterSheet,
+        isLoadingCharacter = uiState.isLoadingCharacter,
+        selectedCharacter = uiState.selectedCharacter,
+        selectedCharacterPictures = uiState.selectedCharacterPictures,
+        onBackClick = onBackClick,
+        onRefresh = {
+            viewModel.refreshSelectedAnime()
+            coroutineScope.launch { fetchPluginEpisodes(forceRefresh = true) }
+        },
+        onToggleWatchlist = { viewModel.toggleWatchlist(anime.id) },
+        onPlayEpisode = { ep -> viewModel.playEpisode(animeForPlayback, ep) },
+        onSwitchPlugin = { plugin ->
+            if (!plugin.isInstalled) {
+                Toast.makeText(context, "${plugin.name} is not installed", Toast.LENGTH_SHORT).show()
+            } else if (!plugin.isEnabled) {
+                Toast.makeText(context, "${plugin.name} is disabled", Toast.LENGTH_SHORT).show()
+            } else {
+                PluginManager.setActiveSource(plugin.id)
+                showSourceSheet = false
+                Toast.makeText(context, "Source: ${plugin.name}", Toast.LENGTH_SHORT).show()
+            }
+        },
+        onOpenCharacter = { viewModel.openCharacter(it) },
+        onCloseCharacter = { viewModel.closeCharacter() },
+        onOpenAnimeByMalId = { malId, title, image ->
+            viewModel.closeCharacter()
+            viewModel.openAnimeByMalId(malId, title, image)
+        },
+        onOpenExternalUrl = { url -> openExternalUrl(context, url) }
+    )
+}
+
+@Composable
+internal fun DetailScreenContent(
+    anime: Anime,
+    displayEpisodes: List<Episode>,
+    isInWatchlist: Boolean,
+    isLoadingDetails: Boolean,
+    isLoadingExtras: Boolean,
+    extras: AnimeExtras,
+    selectedTab: Int,
+    onSelectTab: (Int) -> Unit,
+    sourceAvailability: SourceAvailabilityState,
+    activeSourceShortName: String,
+    availablePlugins: List<AnimeSourcePlugin>,
+    activeSourceId: String,
+    showSourceSheet: Boolean,
+    onShowSourceSheet: (Boolean) -> Unit,
+    showCharacterSheet: Boolean,
+    isLoadingCharacter: Boolean,
+    selectedCharacter: MalCharacterDetails?,
+    selectedCharacterPictures: List<MalPicture>,
+    onBackClick: () -> Unit,
+    onRefresh: () -> Unit,
+    onToggleWatchlist: () -> Unit,
+    onPlayEpisode: (Episode) -> Unit,
+    onSwitchPlugin: (AnimeSourcePlugin) -> Unit,
+    onOpenCharacter: (Int) -> Unit,
+    onCloseCharacter: () -> Unit,
+    onOpenAnimeByMalId: (Int, String, String?) -> Unit,
+    onOpenExternalUrl: (String) -> Unit
+) {
+    val windowSize = LocalWindowSizeClass.current
+    var isSynopsisExpanded by remember(anime.id) { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = onBackClick,
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = Color.Black.copy(alpha = 0.5f),
-                                contentColor = Color.White
-                            )
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        IconButton(
-                            onClick = {
-                                viewModel.refreshSelectedAnime()
-                                coroutineScope.launch { fetchPluginEpisodes(forceRefresh = true) }
-                            },
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = Color.Black.copy(alpha = 0.5f),
-                                contentColor = Color.White
-                            )
-                        ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                        }
-
-                        IconButton(
-                            onClick = { viewModel.toggleWatchlist(anime.id) },
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = Color.Black.copy(alpha = 0.5f),
-                                contentColor = if (isInWatchlist) MaterialTheme.colorScheme.primary else Color.White
-                            )
-                        ) {
-                            Icon(
-                                imageVector = if (isInWatchlist) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                                contentDescription = "Watchlist"
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { showSourceSheet = true },
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = Color.Black.copy(alpha = 0.5f),
-                                contentColor = Color.White
-                            )
-                        ) {
-                            Icon(Icons.Default.Extension, contentDescription = "Source")
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent
-                    )
-                )
-            }
-        ) { _ ->
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 80.dp)
-            ) {
-                // Header Banner with Gradient + Optional TMDB Logo
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(300.dp)
-                    ) {
-                        AsyncImage(
-                            model = anime.bannerUrl.ifBlank { anime.coverUrl },
-                            contentDescription = anime.title,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.Black.copy(alpha = 0.45f),
-                                            Color.Transparent,
-                                            MaterialTheme.colorScheme.background
-                                        )
-                                    )
-                                )
-                        )
-                        if (!anime.logoUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = anime.logoUrl,
-                                contentDescription = anime.title,
-                                modifier = Modifier
-                                    .align(Alignment.BottomStart)
-                                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                                    .height(64.dp)
-                                    .widthIn(max = 260.dp),
-                                contentScale = ContentScale.Fit,
-                                alignment = Alignment.CenterStart
-                            )
-                        }
-                    }
-                }
-
-                // Anime Meta Info
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                    ) {
-                        if (anime.japaneseTitle.isNotBlank()) {
-                            Text(
-                                text = anime.japaneseTitle,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                        }
-                        Text(
-                            text = anime.title,
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Badges row (horizontally scrollable to avoid clipping)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                        ) {
-                            if (anime.score > 0.0) {
-                                Surface(
-                                    color = Color(0xFFFFB400).copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Star,
-                                            contentDescription = null,
-                                            tint = Color(0xFFFFB400),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "${anime.score}",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFFFFB400)
-                                        )
-                                    }
-                                }
-                            }
-
-                            if (anime.rank != null) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text(
-                                        text = "#${anime.rank}",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-
-                            Surface(
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text(
-                                    text = anime.status,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-
-                            val epLabel = if (anime.episodes > 0) "${anime.episodes} Ep" else "${displayEpisodes.size} Ep"
-                            val yearLabel = if (anime.year > 0) "${anime.season} ${anime.year}" else anime.season
-                            Text(
-                                text = "$yearLabel • $epLabel",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-
-                            val chipIsUnavailable = sourceAvailability is SourceAvailabilityState.Unavailable ||
-                                sourceAvailability is SourceAvailabilityState.NoActivePlugin
-                            val chipContainerColor = when {
-                                chipIsUnavailable -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.75f)
-                                sourceAvailability is SourceAvailabilityState.Available -> Color(0xFF22C55E).copy(alpha = 0.16f)
-                                else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                            }
-                            val chipContentColor = when {
-                                chipIsUnavailable -> MaterialTheme.colorScheme.error
-                                sourceAvailability is SourceAvailabilityState.Available -> Color(0xFF4ADE80)
-                                else -> MaterialTheme.colorScheme.primary
-                            }
-                            Surface(
-                                color = chipContainerColor,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.clickable { showSourceSheet = true }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    if (sourceAvailability is SourceAvailabilityState.Checking) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(12.dp),
-                                            strokeWidth = 1.6.dp,
-                                            color = chipContentColor
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = when {
-                                                chipIsUnavailable -> Icons.Default.WarningAmber
-                                                sourceAvailability is SourceAvailabilityState.Available -> Icons.Default.CheckCircle
-                                                else -> Icons.Default.Extension
-                                            },
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp),
-                                            tint = chipContentColor
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = when (sourceAvailability) {
-                                            is SourceAvailabilityState.Unavailable -> "Source: $activeSourceShortName • N/A"
-                                            else -> "Source: $activeSourceShortName"
-                                        },
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = chipContentColor,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-
-                        if (uiState.isLoadingDetails) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            LinearProgressIndicator(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(2.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Genres Chips (horizontally scrollable)
-                        if (anime.genres.isNotEmpty()) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState())
-                            ) {
-                                anime.genres.forEach { genre ->
-                                    SuggestionChip(
-                                        onClick = { },
-                                        label = { Text(genre, style = MaterialTheme.typography.labelSmall) },
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                        }
-
-                        // Primary Play / Switch Source Action Button
-                        val availabilitySnapshot = sourceAvailability
-                        val recommendedPlugin = (availabilitySnapshot as? SourceAvailabilityState.Unavailable)
-                            ?.verifiedAlternatives?.firstOrNull()
-                        Button(
-                            onClick = {
-                                when (availabilitySnapshot) {
-                                    is SourceAvailabilityState.Available -> {
-                                        val firstEpisode = displayEpisodes.firstOrNull()
-                                        if (firstEpisode != null) {
-                                            viewModel.playEpisode(animeForPlayback, firstEpisode)
-                                        }
-                                    }
-                                    is SourceAvailabilityState.Unavailable -> {
-                                        if (recommendedPlugin != null) {
-                                            PluginManager.setActiveSource(recommendedPlugin.id)
-                                            Toast.makeText(context, "Switched source to ${recommendedPlugin.name}", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            showSourceSheet = true
-                                        }
-                                    }
-                                    is SourceAvailabilityState.NoActivePlugin -> {
-                                        showSourceSheet = true
-                                    }
-                                    is SourceAvailabilityState.Checking -> Unit
-                                }
-                            },
-                            enabled = availabilitySnapshot !is SourceAvailabilityState.Checking,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = when (availabilitySnapshot) {
-                                    is SourceAvailabilityState.Unavailable,
-                                    is SourceAvailabilityState.NoActivePlugin -> MaterialTheme.colorScheme.tertiary
-                                    else -> MaterialTheme.colorScheme.primary
-                                },
-                                contentColor = when (availabilitySnapshot) {
-                                    is SourceAvailabilityState.Unavailable,
-                                    is SourceAvailabilityState.NoActivePlugin -> MaterialTheme.colorScheme.onTertiary
-                                    else -> Color.White
-                                }
-                            )
-                        ) {
-                            when (availabilitySnapshot) {
-                                is SourceAvailabilityState.Checking -> {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                        color = Color.White
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = "Checking $activeSourceShortName...",
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                is SourceAvailabilityState.Available -> {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Start Watching Episode 1",
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                is SourceAvailabilityState.Unavailable -> {
-                                    Icon(Icons.Default.SwapHoriz, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = if (recommendedPlugin != null) {
-                                            "Switch to ${recommendedPlugin.name.removeSuffix(" Extractor").trim()}"
-                                        } else {
-                                            "Switch Source Plugin"
-                                        },
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                is SourceAvailabilityState.NoActivePlugin -> {
-                                    Icon(Icons.Default.Extension, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Select Source Plugin",
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Synopsis
-                        Text(
-                            text = "Synopsis",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = anime.synopsis,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = if (isSynopsisExpanded) Int.MAX_VALUE else 3,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        TextButton(
-                            onClick = { isSynopsisExpanded = !isSynopsisExpanded },
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Text(if (isSynopsisExpanded) "Show Less" else "Read More")
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // 4-Tab Navigation: Episodes | Cast | Media | Info
-                        PrimaryTabRow(
-                            selectedTabIndex = selectedTab,
-                            containerColor = MaterialTheme.colorScheme.background,
-                            contentColor = MaterialTheme.colorScheme.primary
-                        ) {
-                            Tab(
-                                selected = selectedTab == 0,
-                                onClick = { selectedTab = 0 },
-                                text = { Text("Episodes (${displayEpisodes.size})", maxLines = 1) }
-                            )
-                            Tab(
-                                selected = selectedTab == 1,
-                                onClick = { selectedTab = 1 },
-                                text = { Text("Cast", maxLines = 1) }
-                            )
-                            Tab(
-                                selected = selectedTab == 2,
-                                onClick = { selectedTab = 2 },
-                                text = { Text("Media", maxLines = 1) }
-                            )
-                            Tab(
-                                selected = selectedTab == 3,
-                                onClick = { selectedTab = 3 },
-                                text = { Text("Info", maxLines = 1) }
-                            )
-                        }
-                    }
-                }
-
-                // ── Tab 0: Episodes ─────────────────────────────────────────
-                if (selectedTab == 0) {
-                    when (val avail = sourceAvailability) {
-                        is SourceAvailabilityState.Checking -> {
-                            item {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 24.dp, vertical = 32.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    CircularProgressIndicator(strokeWidth = 2.5.dp)
-                                    Text(
-                                        text = "Checking availability on ${avail.pluginName}...",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-
-                        is SourceAvailabilityState.Available -> {
-                            items(displayEpisodes, key = { "${it.id}_${it.episodeNumber}" }) { episode ->
-                                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                                    EpisodeCard(
-                                        episode = episode,
-                                        onClick = { viewModel.playEpisode(animeForPlayback, episode) }
-                                    )
-                                }
-                            }
-                        }
-
-                        is SourceAvailabilityState.Unavailable -> {
-                            item {
-                                Card(
-                                    shape = RoundedCornerShape(18.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                    ),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(18.dp),
-                                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                        ) {
-                                            Surface(
-                                                color = MaterialTheme.colorScheme.errorContainer,
-                                                shape = RoundedCornerShape(10.dp),
-                                                modifier = Modifier.size(40.dp)
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.SwapHoriz,
-                                                        contentDescription = null,
-                                                        tint = MaterialTheme.colorScheme.onErrorContainer
-                                                    )
-                                                }
-                                            }
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = "Not available on ${avail.pluginName}",
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
-                                                Text(
-                                                    text = "Switch to another installed source plugin to watch this anime.",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-
-                                        if (avail.verifiedAlternatives.isNotEmpty()) {
-                                            Text(
-                                                text = "Available on:",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = Color(0xFF4ADE80)
-                                            )
-                                            avail.verifiedAlternatives.forEach { alt ->
-                                                Button(
-                                                    onClick = {
-                                                        PluginManager.setActiveSource(alt.id)
-                                                        Toast.makeText(context, "Switched source to ${alt.name}", Toast.LENGTH_SHORT).show()
-                                                    },
-                                                    shape = RoundedCornerShape(12.dp),
-                                                    modifier = Modifier.fillMaxWidth()
-                                                ) {
-                                                    Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Text("Switch to ${alt.name}", fontWeight = FontWeight.Bold)
-                                                }
-                                            }
-                                        } else if (avail.otherInstalledPlugins.isNotEmpty()) {
-                                            avail.otherInstalledPlugins.forEach { alt ->
-                                                FilledTonalButton(
-                                                    onClick = {
-                                                        PluginManager.setActiveSource(alt.id)
-                                                        Toast.makeText(context, "Switched source to ${alt.name}", Toast.LENGTH_SHORT).show()
-                                                    },
-                                                    shape = RoundedCornerShape(12.dp),
-                                                    modifier = Modifier.fillMaxWidth()
-                                                ) {
-                                                    Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Text("Try ${alt.name}", fontWeight = FontWeight.SemiBold)
-                                                }
-                                            }
-                                        }
-
-                                        OutlinedButton(
-                                            onClick = { showSourceSheet = true },
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Icon(Icons.Default.Extension, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text("Choose Source Plugin")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        is SourceAvailabilityState.NoActivePlugin -> {
-                            item {
-                                Card(
-                                    shape = RoundedCornerShape(18.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                    ),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(18.dp),
-                                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.ExtensionOff,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(34.dp)
-                                        )
-                                        Text(
-                                            text = "No Active Source Plugin",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = avail.message,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Button(
-                                            onClick = { showSourceSheet = true },
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Icon(Icons.Default.Extension, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text("Choose Source Plugin")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ── Tab 1: Cast (MAL Characters + Voice Actors) ─────────────
-                if (selectedTab == 1) {
-                    if (uiState.isLoadingExtras && !extras.charactersLoaded) {
-                        item {
-                            LoadingTabPlaceholder("Loading MyAnimeList Cast...")
-                        }
-                    } else if (extras.characters.isEmpty()) {
-                        item {
-                            EmptyTabPlaceholder("No character data available on MyAnimeList.")
-                        }
-                    } else {
-                        items(extras.characters, key = { it.characterId ?: it.name.hashCode() }) { character ->
-                            CharacterRowCard(
-                                character = character,
-                                onClick = {
-                                    character.characterId?.let { viewModel.openCharacter(it) }
-                                }
-                            )
-                        }
-                    }
-                }
-
-                // ── Tab 2: Media (Themes, Trailers/MVs, Pictures) ───────────
-                if (selectedTab == 2) {
-                    if (uiState.isLoadingExtras && !extras.mediaLoaded) {
-                        item {
-                            LoadingTabPlaceholder("Loading Themes, Trailers & Gallery...")
-                        }
-                    } else {
-                        // Trailers & Music Videos
-                        val allVideos = extras.videos.trailers + extras.videos.musicVideos
-                        if (allVideos.isNotEmpty()) {
-                            item {
-                                Column(modifier = Modifier.padding(top = 16.dp)) {
-                                    Text(
-                                        text = "Trailers & Music Videos (${allVideos.size})",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    LazyRow(
-                                        contentPadding = PaddingValues(horizontal = 16.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        items(allVideos, key = { it.embedUrl }) { video ->
-                                            VideoCard(
-                                                video = video,
-                                                onClick = {
-                                                    val url = video.youtubeId?.let { "https://www.youtube.com/watch?v=$it" }
-                                                        ?: video.embedUrl
-                                                    openExternalUrl(context, url)
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Opening & Ending Theme Songs
-                        if (extras.themes.opening.isNotEmpty() || extras.themes.ending.isNotEmpty()) {
-                            item {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    if (extras.themes.opening.isNotEmpty()) {
-                                        Text(
-                                            text = "Opening Themes",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        extras.themes.opening.forEach { theme ->
-                                            ThemeSongCard(
-                                                prefix = "OP ${theme.number}",
-                                                theme = theme,
-                                                onSpotifyClick = { url -> openExternalUrl(context, url) }
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                    }
-                                    if (extras.themes.ending.isNotEmpty()) {
-                                        Text(
-                                            text = "Ending Themes",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        extras.themes.ending.forEach { theme ->
-                                            ThemeSongCard(
-                                                prefix = "ED ${theme.number}",
-                                                theme = theme,
-                                                onSpotifyClick = { url -> openExternalUrl(context, url) }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Pictures Gallery
-                        if (extras.pictures.isNotEmpty()) {
-                            item {
-                                Column(modifier = Modifier.padding(top = 8.dp, bottom = 16.dp)) {
-                                    Text(
-                                        text = "Pictures (${extras.pictures.size})",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    LazyRow(
-                                        contentPadding = PaddingValues(horizontal = 16.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        items(extras.pictures, key = { it.image }) { pic ->
-                                            Card(
-                                                shape = RoundedCornerShape(12.dp),
-                                                modifier = Modifier
-                                                    .width(130.dp)
-                                                    .height(185.dp)
-                                                    .clickable { openExternalUrl(context, pic.image) }
-                                            ) {
-                                                AsyncImage(
-                                                    model = pic.image,
-                                                    contentDescription = "Anime Picture",
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    contentScale = ContentScale.Crop
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if (allVideos.isEmpty() && extras.themes.opening.isEmpty() && extras.themes.ending.isEmpty() && extras.pictures.isEmpty()) {
-                            item {
-                                EmptyTabPlaceholder("No themes, trailers, or pictures found on MyAnimeList.")
-                            }
-                        }
-                    }
-                }
-
-                // ── Tab 3: Info, Legal Streaming, External Links, Recommendations
-                if (selectedTab == 3) {
-                    item {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            anime.type?.let { InfoRow(label = "Type", value = it) }
-                            InfoRow(label = "Studio", value = anime.studio)
-                            anime.source?.let { InfoRow(label = "Source Material", value = it) }
-                            InfoRow(label = "Status", value = anime.status)
-                            anime.aired?.let { InfoRow(label = "Aired", value = it) }
-                            InfoRow(label = "Season", value = if (anime.year > 0) "${anime.season} ${anime.year}" else anime.season)
-                            InfoRow(label = "Total Episodes", value = if (anime.episodes > 0) "${anime.episodes} Episodes" else "Ongoing / Unknown")
-                            InfoRow(label = "Episode Duration", value = anime.duration)
-                            anime.rating?.let { InfoRow(label = "Age Rating", value = it) }
-                            InfoRow(label = "MAL Score", value = if (anime.score > 0.0) "★ ${anime.score} / 10" else "N/A")
-                            anime.rank?.let { InfoRow(label = "Ranked", value = "#$it") }
-                            anime.popularity?.let { InfoRow(label = "Popularity", value = "#$it") }
-                            anime.members?.let { InfoRow(label = "Members", value = "%,d".format(it)) }
-                            anime.malId?.let { InfoRow(label = "MyAnimeList ID", value = it.toString()) }
-                            anime.anilistId?.let { InfoRow(label = "AniList ID", value = it.toString()) }
-                            if (!anime.posterSource.isNullOrBlank() || !anime.bannerSource.isNullOrBlank()) {
-                                InfoRow(
-                                    label = "Art Sources",
-                                    value = "Poster: ${(anime.posterSource ?: "mal").uppercase()} • Banner: ${(anime.bannerSource ?: "mal").uppercase()}"
-                                )
-                            }
-                        }
-                    }
-
-                    // Legal Streaming Platforms (from MAL)
-                    val platforms = extras.streamingPlatforms.ifEmpty { anime.streamingPlatforms }
-                    if (platforms.isNotEmpty()) {
-                        item {
-                            LinkChipSection(
-                                title = "Official Streaming Platforms",
-                                links = platforms,
-                                onLinkClick = { openExternalUrl(context, it.url) }
-                            )
-                        }
-                    }
-
-                    // External Links (from MAL)
-                    if (extras.externalLinks.isNotEmpty()) {
-                        item {
-                            LinkChipSection(
-                                title = "External Links",
-                                links = extras.externalLinks,
-                                onLinkClick = { openExternalUrl(context, it.url) }
-                            )
-                        }
-                    }
-
-                    // Recommendations Carousel ("You Might Also Like")
-                    if (uiState.isLoadingExtras && !extras.moreLoaded) {
-                        item {
-                            LoadingTabPlaceholder("Loading Recommendations & Links...")
-                        }
-                    } else if (extras.recommendations.isNotEmpty()) {
-                        item {
-                            Column(modifier = Modifier.padding(top = 12.dp, bottom = 16.dp)) {
-                                Text(
-                                    text = "You Might Also Like",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 16.dp)
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                                LazyRow(
-                                    contentPadding = PaddingValues(horizontal = 16.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    items(extras.recommendations, key = { it.animeId }) { rec ->
-                                        RecommendationCard(
-                                            rec = rec,
-                                            onClick = {
-                                                viewModel.openAnimeByMalId(rec.animeId, rec.title, rec.image)
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ══════════════════════════════════════════════════════════════
-        // CHARACTER DETAILS BOTTOM SHEET (Single MAL Character Scrape)
-        // ══════════════════════════════════════════════════════════════
-        if (uiState.showCharacterSheet) {
-            Box(
+        if (windowSize.useTwoPaneDetail) {
+            // Two-pane Detail layout for foldables & tablets: Left (poster + info) | Right (tabs + episodes)
+            Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.65f))
-                    .clickable { viewModel.closeCharacter() }
-            )
-        }
-
-        AnimatedVisibility(
-            visible = uiState.showCharacterSheet,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            CharacterDetailsSheet(
-                uiState = uiState,
-                onDismiss = { viewModel.closeCharacter() },
-                onOpenAnime = { malId, title, image ->
-                    viewModel.closeCharacter()
-                    viewModel.openAnimeByMalId(malId, title, image)
-                }
-            )
-        }
-
-        // ══════════════════════════════════════════════════════════════
-        // SOURCE BOTTOM SHEET (KAnikoto Streaming Plugin Picker)
-        // ══════════════════════════════════════════════════════════════
-        if (showSourceSheet) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.65f))
-                    .clickable { showSourceSheet = false }
-            )
-        }
-
-        AnimatedVisibility(
-            visible = showSourceSheet,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.75f),
-                color = MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                shadowElevation = 16.dp
+                    .displayCutoutPadding()
+                    .padding(top = 72.dp, start = KanimeSpacing.xl, end = KanimeSpacing.xl),
+                horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.xl)
             ) {
                 Column(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                        .weight(0.42f)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .navigationBarsPadding()
+                        .padding(bottom = KanimeSpacing.xl),
+                    verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .padding(vertical = 8.dp)
-                            .size(width = 44.dp, height = 4.dp)
-                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f), RoundedCornerShape(2.dp))
+                    DetailBackdropCard(anime = anime, height = 220.dp)
+                    DetailHeroMetaAndActions(
+                        anime = anime,
+                        displayEpisodes = displayEpisodes,
+                        isInWatchlist = isInWatchlist,
+                        isLoadingDetails = isLoadingDetails,
+                        isSynopsisExpanded = isSynopsisExpanded,
+                        onToggleSynopsis = { isSynopsisExpanded = !isSynopsisExpanded },
+                        sourceAvailability = sourceAvailability,
+                        activeSourceShortName = activeSourceShortName,
+                        onToggleWatchlist = onToggleWatchlist,
+                        onOpenSourceSheet = { onShowSourceSheet(true) },
+                        onPlayFirst = { displayEpisodes.firstOrNull()?.let(onPlayEpisode) },
+                        onSwitchPlugin = onSwitchPlugin
                     )
+                }
 
-                    Text(
-                        text = "Source",
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                Column(
+                    modifier = Modifier
+                        .weight(0.58f)
+                        .fillMaxHeight()
+                ) {
+                    DetailTabBar(
+                        selectedTab = selectedTab,
+                        episodeCount = displayEpisodes.size,
+                        onSelectTab = onSelectTab
                     )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    val categoryChips = remember(availablePlugins) {
-                        listOf("All Sources", "Installed") + availablePlugins.map { it.name.substringBefore(" ") }
+                    Spacer(modifier = Modifier.height(KanimeSpacing.md))
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 48.dp),
+                        verticalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
+                    ) {
+                        detailTabItems(
+                            selectedTab = selectedTab,
+                            anime = anime,
+                            displayEpisodes = displayEpisodes,
+                            sourceAvailability = sourceAvailability,
+                            isLoadingExtras = isLoadingExtras,
+                            extras = extras,
+                            onPlayEpisode = onPlayEpisode,
+                            onSwitchPlugin = onSwitchPlugin,
+                            onOpenSourceSheet = { onShowSourceSheet(true) },
+                            onOpenCharacter = onOpenCharacter,
+                            onOpenAnimeByMalId = onOpenAnimeByMalId,
+                            onOpenExternalUrl = onOpenExternalUrl,
+                            horizontalPadding = 0.dp
+                        )
                     }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                }
+            }
+        } else {
+            // Single-column Compact phone layout
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 56.dp)
+            ) {
+                item(key = "header") {
+                    DetailFullBleedBackdrop(anime = anime)
+                }
+
+                item(key = "meta") {
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = KanimeSpacing.lg),
+                        verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
                     ) {
-                        for (categoryName in categoryChips.distinct()) {
-                            val isChosen = selectedFramework == categoryName
-                            FilterChip(
-                                selected = isChosen,
-                                onClick = { selectedFramework = categoryName },
-                                label = { Text(categoryName) },
-                                leadingIcon = {
-                                    if (categoryName == "Installed") {
-                                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    } else if (categoryName == "All Sources") {
-                                        Icon(Icons.Default.AllInclusive, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    } else {
-                                        Icon(Icons.Default.Extension, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp)
+                        DetailHeroMetaAndActions(
+                            anime = anime,
+                            displayEpisodes = displayEpisodes,
+                            isInWatchlist = isInWatchlist,
+                            isLoadingDetails = isLoadingDetails,
+                            isSynopsisExpanded = isSynopsisExpanded,
+                            onToggleSynopsis = { isSynopsisExpanded = !isSynopsisExpanded },
+                            sourceAvailability = sourceAvailability,
+                            activeSourceShortName = activeSourceShortName,
+                            onToggleWatchlist = onToggleWatchlist,
+                            onOpenSourceSheet = { onShowSourceSheet(true) },
+                            onPlayFirst = { displayEpisodes.firstOrNull()?.let(onPlayEpisode) },
+                            onSwitchPlugin = onSwitchPlugin
+                        )
+
+                        DetailTabBar(
+                            selectedTab = selectedTab,
+                            episodeCount = displayEpisodes.size,
+                            onSelectTab = onSelectTab
+                        )
+                        Spacer(modifier = Modifier.height(KanimeSpacing.xs))
+                    }
+                }
+
+                detailTabItems(
+                    selectedTab = selectedTab,
+                    anime = anime,
+                    displayEpisodes = displayEpisodes,
+                    sourceAvailability = sourceAvailability,
+                    isLoadingExtras = isLoadingExtras,
+                    extras = extras,
+                    onPlayEpisode = onPlayEpisode,
+                    onSwitchPlugin = onSwitchPlugin,
+                    onOpenSourceSheet = { onShowSourceSheet(true) },
+                    onOpenCharacter = onOpenCharacter,
+                    onOpenAnimeByMalId = onOpenAnimeByMalId,
+                    onOpenExternalUrl = onOpenExternalUrl,
+                    horizontalPadding = KanimeSpacing.lg
+                )
+            }
+        }
+
+        // Sticky Floating Glass Action Top Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .displayCutoutPadding()
+                .padding(horizontal = KanimeSpacing.lg, vertical = KanimeSpacing.sm)
+                .align(Alignment.TopCenter),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            GlassIconButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(R.string.action_back),
+                overMedia = true,
+                onClick = onBackClick
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)) {
+                GlassIconButton(
+                    icon = Icons.Default.Refresh,
+                    contentDescription = stringResource(R.string.action_refresh),
+                    overMedia = true,
+                    onClick = onRefresh
+                )
+                GlassIconButton(
+                    icon = if (isInWatchlist) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                    contentDescription = stringResource(R.string.cd_watchlist),
+                    overMedia = true,
+                    selected = isInWatchlist,
+                    onClick = onToggleWatchlist
+                )
+                GlassIconButton(
+                    icon = Icons.Default.Extension,
+                    contentDescription = stringResource(R.string.cd_source),
+                    overMedia = true,
+                    onClick = { onShowSourceSheet(true) }
+                )
+            }
+        }
+
+        // Character Details Glass Sheet
+        GlassSheet(
+            visible = showCharacterSheet,
+            onDismiss = onCloseCharacter,
+            maxHeightFraction = 0.82f
+        ) {
+            CharacterDetailsSheetBody(
+                isLoading = isLoadingCharacter,
+                character = selectedCharacter,
+                pictures = selectedCharacterPictures,
+                onDismiss = onCloseCharacter,
+                onOpenAnime = onOpenAnimeByMalId
+            )
+        }
+
+        // Source Plugin Picker Glass Sheet
+        GlassSheet(
+            visible = showSourceSheet,
+            onDismiss = { onShowSourceSheet(false) },
+            maxHeightFraction = 0.72f
+        ) {
+            SourcePickerSheetBody(
+                availablePlugins = availablePlugins,
+                activeSourceId = activeSourceId,
+                onSelectPlugin = onSwitchPlugin
+            )
+        }
+    }
+}
+
+@Composable
+private fun DetailFullBleedBackdrop(anime: Anime) {
+    val bg = MaterialTheme.colorScheme.background
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(290.dp)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        AsyncImage(
+            model = anime.bannerUrl.ifBlank { anime.coverUrl },
+            contentDescription = anime.title,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to bg.copy(alpha = 0.25f),
+                        0.45f to Color.Transparent,
+                        0.82f to bg.copy(alpha = 0.85f),
+                        1.0f to bg
+                    )
+                )
+        )
+    }
+}
+
+@Composable
+private fun DetailBackdropCard(
+    anime: Anime,
+    height: androidx.compose.ui.unit.Dp
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(MaterialTheme.shapes.extraLarge)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        AsyncImage(
+            model = anime.bannerUrl.ifBlank { anime.coverUrl },
+            contentDescription = anime.title,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+    }
+}
+
+@Composable
+private fun DetailHeroMetaAndActions(
+    anime: Anime,
+    displayEpisodes: List<Episode>,
+    isInWatchlist: Boolean,
+    isLoadingDetails: Boolean,
+    isSynopsisExpanded: Boolean,
+    onToggleSynopsis: () -> Unit,
+    sourceAvailability: SourceAvailabilityState,
+    activeSourceShortName: String,
+    onToggleWatchlist: () -> Unit,
+    onOpenSourceSheet: () -> Unit,
+    onPlayFirst: () -> Unit,
+    onSwitchPlugin: (AnimeSourcePlugin) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)) {
+        Text(
+            text = anime.title,
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+
+        // Concise 1-row metadata pills: Score (tertiary), Status, Year · Episodes, Source chip
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (anime.score > 0.0) {
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    shape = PillShape
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = String.format("%.1f", anime.score),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+                }
+            }
+
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = PillShape
+            ) {
+                Text(
+                    text = anime.status,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                )
+            }
+
+            val epCount = if (anime.episodes > 0) anime.episodes else displayEpisodes.size
+            val meta = buildList {
+                if (anime.year > 0) add(anime.year.toString())
+                if (epCount > 0) add("$epCount Ep")
+            }.joinToString(" · ")
+            if (meta.isNotBlank()) {
+                Text(
+                    text = meta,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Compact Source Availability Chip (pure M3 color roles)
+            val isUnavailable = sourceAvailability is SourceAvailabilityState.Unavailable ||
+                sourceAvailability is SourceAvailabilityState.NoActivePlugin
+            val sourceBg = if (isUnavailable) {
+                MaterialTheme.colorScheme.errorContainer
+            } else {
+                MaterialTheme.colorScheme.primaryContainer
+            }
+            val sourceFg = if (isUnavailable) {
+                MaterialTheme.colorScheme.onErrorContainer
+            } else {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            }
+            Surface(
+                onClick = onOpenSourceSheet,
+                color = sourceBg,
+                shape = PillShape
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    if (sourceAvailability is SourceAvailabilityState.Checking) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(11.dp),
+                            strokeWidth = 1.6.dp,
+                            color = sourceFg
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (isUnavailable) Icons.Default.WarningAmber else Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = sourceFg,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                    Text(
+                        text = activeSourceShortName,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = sourceFg
+                    )
+                }
+            }
+        }
+
+        if (isLoadingDetails) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .clip(PillShape),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+            )
+        }
+
+        // Primary Action Row: Play / Switch Source + Save
+        val recommendedPlugin = (sourceAvailability as? SourceAvailabilityState.Unavailable)
+            ?.verifiedAlternatives?.firstOrNull()
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.md),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val primaryLabel = when (sourceAvailability) {
+                is SourceAvailabilityState.Checking -> stringResource(R.string.detail_checking_source, activeSourceShortName)
+                is SourceAvailabilityState.Available -> stringResource(R.string.detail_start_watching)
+                is SourceAvailabilityState.Unavailable -> if (recommendedPlugin != null) {
+                    stringResource(R.string.detail_switch_to, recommendedPlugin.name.removeSuffix(" Extractor").trim())
+                } else {
+                    stringResource(R.string.action_switch_source)
+                }
+                is SourceAvailabilityState.NoActivePlugin -> stringResource(R.string.detail_select_source)
+            }
+            val primaryIcon = when (sourceAvailability) {
+                is SourceAvailabilityState.Available -> Icons.Default.PlayArrow
+                is SourceAvailabilityState.Unavailable -> Icons.Default.SwapHoriz
+                is SourceAvailabilityState.NoActivePlugin -> Icons.Default.Extension
+                is SourceAvailabilityState.Checking -> null
+            }
+
+            GlassButton(
+                text = primaryLabel,
+                icon = primaryIcon,
+                style = GlassButtonStyle.Primary,
+                enabled = sourceAvailability !is SourceAvailabilityState.Checking,
+                onClick = {
+                    when (sourceAvailability) {
+                        is SourceAvailabilityState.Available -> onPlayFirst()
+                        is SourceAvailabilityState.Unavailable -> {
+                            if (recommendedPlugin != null) onSwitchPlugin(recommendedPlugin)
+                            else onOpenSourceSheet()
+                        }
+                        is SourceAvailabilityState.NoActivePlugin -> onOpenSourceSheet()
+                        is SourceAvailabilityState.Checking -> Unit
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            )
+
+            GlassButton(
+                text = stringResource(if (isInWatchlist) R.string.hero_saved else R.string.hero_save),
+                icon = if (isInWatchlist) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                style = if (isInWatchlist) GlassButtonStyle.Tonal else GlassButtonStyle.Glass,
+                onClick = onToggleWatchlist
+            )
+        }
+
+        // Collapsible Synopsis
+        if (anime.synopsis.isNotBlank()) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = anime.synopsis.trim(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = if (isSynopsisExpanded) Int.MAX_VALUE else 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+                TextButton(
+                    onClick = onToggleSynopsis,
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier.heightIn(min = 36.dp)
+                ) {
+                    Text(
+                        text = stringResource(if (isSynopsisExpanded) R.string.detail_less else R.string.detail_more),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+
+        // Clean genre pills
+        if (anime.genres.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
+            ) {
+                anime.genres.forEach { genre ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                        shape = PillShape
+                    ) {
+                        Text(
+                            text = genre,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailTabBar(
+    selectedTab: Int,
+    episodeCount: Int,
+    onSelectTab: (Int) -> Unit
+) {
+    val tabs = listOf(
+        if (episodeCount > 0) "${stringResource(R.string.detail_tab_episodes)} ($episodeCount)"
+        else stringResource(R.string.detail_tab_episodes),
+        stringResource(R.string.detail_tab_cast),
+        stringResource(R.string.detail_tab_media),
+        stringResource(R.string.detail_tab_info)
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
+    ) {
+        tabs.forEachIndexed { idx, label ->
+            GlassChip(
+                label = label,
+                selected = selectedTab == idx,
+                onClick = { onSelectTab(idx) }
+            )
+        }
+    }
+}
+
+private fun LazyListScope.detailTabItems(
+    selectedTab: Int,
+    anime: Anime,
+    displayEpisodes: List<Episode>,
+    sourceAvailability: SourceAvailabilityState,
+    isLoadingExtras: Boolean,
+    extras: AnimeExtras,
+    onPlayEpisode: (Episode) -> Unit,
+    onSwitchPlugin: (AnimeSourcePlugin) -> Unit,
+    onOpenSourceSheet: () -> Unit,
+    onOpenCharacter: (Int) -> Unit,
+    onOpenAnimeByMalId: (Int, String, String?) -> Unit,
+    onOpenExternalUrl: (String) -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp
+) {
+    // Tab 0: Episodes
+    if (selectedTab == 0) {
+        when (sourceAvailability) {
+            is SourceAvailabilityState.Checking -> {
+                items(4) {
+                    Box(modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 6.dp)) {
+                        ShimmerBox(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(86.dp),
+                            shape = MaterialTheme.shapes.medium
+                        )
+                    }
+                }
+            }
+
+            is SourceAvailabilityState.Available -> {
+                items(displayEpisodes, key = { "${it.id}_${it.episodeNumber}" }) { episode ->
+                    Box(modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 5.dp)) {
+                        EpisodeCard(
+                            episode = episode,
+                            onClick = { onPlayEpisode(episode) }
+                        )
+                    }
+                }
+            }
+
+            is SourceAvailabilityState.Unavailable -> {
+                item(key = "source_unavailable") {
+                    Surface(
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = horizontalPadding, vertical = 8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(KanimeSpacing.lg),
+                            verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.detail_source_unavailable, sourceAvailability.pluginName),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = stringResource(R.string.detail_source_switch_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            val alts = sourceAvailability.verifiedAlternatives.ifEmpty {
+                                sourceAvailability.otherInstalledPlugins
+                            }
+                            alts.forEach { alt ->
+                                GlassButton(
+                                    text = stringResource(R.string.detail_switch_to, alt.name),
+                                    icon = Icons.Default.SwapHoriz,
+                                    style = GlassButtonStyle.Primary,
+                                    onClick = { onSwitchPlugin(alt) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
+                            GlassButton(
+                                text = stringResource(R.string.detail_choose_source),
+                                icon = Icons.Default.Extension,
+                                style = GlassButtonStyle.Glass,
+                                onClick = onOpenSourceSheet,
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
+                }
+            }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    OutlinedTextField(
-                        value = extensionSearchQuery,
-                        onValueChange = { extensionSearchQuery = it },
-                        placeholder = { Text("Search available plugins...") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                        )
+            is SourceAvailabilityState.NoActivePlugin -> {
+                item(key = "no_plugin") {
+                    EmptyStateView(
+                        icon = Icons.Default.ExtensionOff,
+                        title = stringResource(R.string.detail_no_plugin_title),
+                        subtitle = sourceAvailability.message,
+                        actionLabel = stringResource(R.string.detail_choose_source),
+                        onAction = onOpenSourceSheet
                     )
+                }
+            }
+        }
+    }
 
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    val displayedPlugins = availablePlugins.filter { p ->
-                        val matchesQuery = extensionSearchQuery.isBlank() ||
-                            p.name.contains(extensionSearchQuery, ignoreCase = true) ||
-                            p.description.contains(extensionSearchQuery, ignoreCase = true)
-                        val matchesCategory = when (selectedFramework) {
-                            "Installed" -> p.isInstalled
-                            "All Sources" -> true
-                            else -> p.name.contains(selectedFramework, ignoreCase = true)
-                        }
-                        matchesQuery && matchesCategory
-                    }
-
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+    // Tab 1: Cast
+    if (selectedTab == 1) {
+        if (isLoadingExtras && !extras.charactersLoaded) {
+            items(4) {
+                Box(modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 6.dp)) {
+                    ShimmerBox(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(bottom = 16.dp)
-                    ) {
-                        items(displayedPlugins) { plugin ->
-                            val isActive = activeSourceId == plugin.id
-                            Surface(
-                                onClick = {
-                                    if (!plugin.isInstalled) {
-                                        Toast.makeText(context, "${plugin.name} is not installed (Settings → Video Source Plugins)", Toast.LENGTH_SHORT).show()
-                                        return@Surface
-                                    }
-                                    if (!plugin.isEnabled) {
-                                        Toast.makeText(context, "${plugin.name} is disabled (Settings → Video Source Plugins)", Toast.LENGTH_SHORT).show()
-                                        return@Surface
-                                    }
-                                    PluginManager.setActiveSource(plugin.id)
-                                    showSourceSheet = false
-                                },
-                                shape = RoundedCornerShape(14.dp),
-                                color = if (isActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Surface(
-                                            color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                                            shape = RoundedCornerShape(10.dp),
-                                            modifier = Modifier.size(40.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    imageVector = Icons.Default.PlayArrow,
-                                                    contentDescription = null,
-                                                    tint = Color.White
-                                                )
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.width(14.dp))
-                                        Column {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(
-                                                    text = plugin.name,
-                                                    color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                                                    style = MaterialTheme.typography.bodyLarge,
-                                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Surface(
-                                                    color = if (plugin.isInstalled) Color(0xFF4CAF50).copy(alpha = 0.2f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                                                    shape = RoundedCornerShape(4.dp)
-                                                ) {
-                                                    Text(
-                                                        text = if (plugin.isInstalled) "INSTALLED" else "NOT INSTALLED",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = if (plugin.isInstalled) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
-                                                        fontWeight = FontWeight.Bold,
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                text = "${plugin.packageName} • v${plugin.version}",
-                                                color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f) else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                style = MaterialTheme.typography.bodySmall
-                                            )
-                                        }
-                                    }
+                            .fillMaxWidth()
+                            .height(68.dp),
+                        shape = MaterialTheme.shapes.medium
+                    )
+                }
+            }
+        } else if (extras.characters.isEmpty()) {
+            item {
+                EmptyStateView(
+                    icon = Icons.Default.VisibilityOff,
+                    title = stringResource(R.string.detail_cast_empty)
+                )
+            }
+        } else {
+            items(extras.characters, key = { it.characterId ?: it.name.hashCode() }) { character ->
+                Box(modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 5.dp)) {
+                    CharacterRowCard(
+                        character = character,
+                        onClick = { character.characterId?.let(onOpenCharacter) }
+                    )
+                }
+            }
+        }
+    }
 
-                                    if (isActive) {
-                                        Icon(
-                                            Icons.Default.CheckCircle,
-                                            contentDescription = "Active",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(24.dp)
-                                        )
+    // Tab 2: Media
+    if (selectedTab == 2) {
+        if (isLoadingExtras && !extras.mediaLoaded) {
+            item {
+                Box(modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 12.dp)) {
+                    ShimmerBox(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp),
+                        shape = MaterialTheme.shapes.large
+                    )
+                }
+            }
+        } else {
+            val allVideos = extras.videos.trailers + extras.videos.musicVideos
+            if (allVideos.isNotEmpty()) {
+                item(key = "media_videos") {
+                    Column(modifier = Modifier.padding(vertical = KanimeSpacing.sm)) {
+                        Text(
+                            text = stringResource(R.string.detail_trailers),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.padding(horizontal = horizontalPadding)
+                        )
+                        Spacer(modifier = Modifier.height(KanimeSpacing.sm))
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = horizontalPadding),
+                            horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
+                        ) {
+                            items(allVideos, key = { it.embedUrl }) { video ->
+                                VideoCard(
+                                    video = video,
+                                    onClick = {
+                                        val url = video.youtubeId?.let { "https://www.youtube.com/watch?v=$it" }
+                                            ?: video.embedUrl
+                                        onOpenExternalUrl(url)
                                     }
-                                }
+                                )
                             }
+                        }
+                    }
+                }
+            }
+
+            if (extras.themes.opening.isNotEmpty() || extras.themes.ending.isNotEmpty()) {
+                item(key = "media_themes") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = horizontalPadding, vertical = KanimeSpacing.sm),
+                        verticalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
+                    ) {
+                        if (extras.themes.opening.isNotEmpty()) {
+                            Text(
+                                text = stringResource(R.string.detail_openings),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            extras.themes.opening.forEach { theme ->
+                                ThemeSongCard("OP ${theme.number}", theme, onOpenExternalUrl)
+                            }
+                        }
+                        if (extras.themes.ending.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(KanimeSpacing.sm))
+                            Text(
+                                text = stringResource(R.string.detail_endings),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            extras.themes.ending.forEach { theme ->
+                                ThemeSongCard("ED ${theme.number}", theme, onOpenExternalUrl)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (extras.pictures.isNotEmpty()) {
+                item(key = "media_gallery") {
+                    Column(modifier = Modifier.padding(vertical = KanimeSpacing.sm)) {
+                        Text(
+                            text = stringResource(R.string.detail_gallery),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.padding(horizontal = horizontalPadding)
+                        )
+                        Spacer(modifier = Modifier.height(KanimeSpacing.sm))
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = horizontalPadding),
+                            horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
+                        ) {
+                            items(extras.pictures, key = { it.image }) { pic ->
+                                AsyncImage(
+                                    model = pic.image,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .width(126.dp)
+                                        .aspectRatio(2f / 3f)
+                                        .clip(MaterialTheme.shapes.medium)
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                        .clickable { onOpenExternalUrl(pic.image) },
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (allVideos.isEmpty() && extras.themes.opening.isEmpty() && extras.themes.ending.isEmpty() && extras.pictures.isEmpty()) {
+                item {
+                    EmptyStateView(
+                        icon = Icons.Default.MusicNote,
+                        title = stringResource(R.string.detail_media_empty)
+                    )
+                }
+            }
+        }
+    }
+
+    // Tab 3: Info + Progressive Disclosure Details + Recommendations
+    if (selectedTab == 3) {
+        item(key = "info_card") {
+            DetailInfoSection(
+                anime = anime,
+                modifier = Modifier.padding(horizontal = horizontalPadding, vertical = KanimeSpacing.sm)
+            )
+        }
+
+        val platforms = extras.streamingPlatforms.ifEmpty { anime.streamingPlatforms }
+        if (platforms.isNotEmpty()) {
+            item(key = "info_platforms") {
+                LinkChipSection(
+                    title = stringResource(R.string.detail_platforms),
+                    links = platforms,
+                    onLinkClick = { onOpenExternalUrl(it.url) },
+                    horizontalPadding = horizontalPadding
+                )
+            }
+        }
+
+        if (extras.externalLinks.isNotEmpty()) {
+            item(key = "info_links") {
+                LinkChipSection(
+                    title = stringResource(R.string.detail_links),
+                    links = extras.externalLinks,
+                    onLinkClick = { onOpenExternalUrl(it.url) },
+                    horizontalPadding = horizontalPadding
+                )
+            }
+        }
+
+        if (extras.recommendations.isNotEmpty()) {
+            item(key = "info_recs") {
+                Column(modifier = Modifier.padding(vertical = KanimeSpacing.md)) {
+                    Text(
+                        text = stringResource(R.string.detail_recommendations),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(horizontal = horizontalPadding)
+                    )
+                    Spacer(modifier = Modifier.height(KanimeSpacing.sm))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = horizontalPadding),
+                        horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
+                    ) {
+                        items(extras.recommendations, key = { it.animeId }) { rec ->
+                            RecommendationCard(
+                                rec = rec,
+                                onClick = { onOpenAnimeByMalId(rec.animeId, rec.title, rec.image) }
+                            )
                         }
                     }
                 }
@@ -1394,38 +1290,215 @@ fun DetailScreen(
 }
 
 @Composable
-private fun LoadingTabPlaceholder(message: String) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(36.dp),
-        contentAlignment = Alignment.Center
+private fun DetailInfoSection(
+    anime: Anime,
+    modifier: Modifier = Modifier
+) {
+    var showTechnicalDetails by remember(anime.id) { mutableStateOf(false) }
+
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        modifier = modifier.fillMaxWidth()
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 2.5.dp)
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        Column(
+            modifier = Modifier.padding(KanimeSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            InfoRow("Studio", anime.studio)
+            anime.type?.let { InfoRow("Format", it) }
+            InfoRow("Season", if (anime.year > 0) "${anime.season} ${anime.year}" else anime.season)
+            InfoRow("Episodes", if (anime.episodes > 0) "${anime.episodes}" else "—")
+            InfoRow("Duration", anime.duration)
+            anime.rank?.let { InfoRow("Rank", "#$it") }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 40.dp)
+                    .clickable { showTechnicalDetails = !showTechnicalDetails },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.detail_more_details),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Icon(
+                    imageVector = if (showTechnicalDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            AnimatedVisibility(visible = showTechnicalDetails) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    anime.source?.let { InfoRow("Source", it) }
+                    anime.aired?.let { InfoRow("Aired", it) }
+                    anime.rating?.let { InfoRow("Rating", it) }
+                    anime.popularity?.let { InfoRow("Popularity", "#$it") }
+                    anime.members?.let { InfoRow("Members", "%,d".format(it)) }
+                    anime.malId?.let { InfoRow("MAL", it.toString()) }
+                    anime.anilistId?.let { InfoRow("AniList", it.toString()) }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun EmptyTabPlaceholder(message: String) {
-    Box(
+private fun SourcePickerSheetBody(
+    availablePlugins: List<AnimeSourcePlugin>,
+    activeSourceId: String,
+    onSelectPlugin: (AnimeSourcePlugin) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var filterInstalled by remember { mutableStateOf(false) }
+
+    val displayed = remember(availablePlugins, query, filterInstalled) {
+        availablePlugins.filter { p ->
+            val matchesQuery = query.isBlank() ||
+                p.name.contains(query, ignoreCase = true) ||
+                p.description.contains(query, ignoreCase = true)
+            val matchesFilter = !filterInstalled || p.isInstalled
+            matchesQuery && matchesFilter
+        }
+    }
+
+    Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(32.dp),
-        contentAlignment = Alignment.Center
+            .fillMaxSize()
+            .padding(horizontal = KanimeSpacing.lg)
     ) {
         Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            text = stringResource(R.string.detail_source_sheet_title),
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface
         )
+
+        Spacer(modifier = Modifier.height(KanimeSpacing.md))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)) {
+            GlassChip(
+                label = stringResource(R.string.filter_all),
+                selected = !filterInstalled,
+                onClick = { filterInstalled = false }
+            )
+            GlassChip(
+                label = stringResource(R.string.plugins_active),
+                selected = filterInstalled,
+                onClick = { filterInstalled = true }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(KanimeSpacing.md))
+
+        GlassSurface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp),
+            shape = PillShape,
+            showShadow = false
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Box(modifier = Modifier.weight(1f)) {
+                    if (query.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.detail_source_search_hint),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    BasicTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(KanimeSpacing.md))
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(KanimeSpacing.sm),
+            contentPadding = PaddingValues(bottom = 24.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            items(displayed, key = { it.id }) { plugin ->
+                val isActive = activeSourceId == plugin.id
+                Surface(
+                    onClick = { onSelectPlugin(plugin) },
+                    shape = MaterialTheme.shapes.medium,
+                    color = if (isActive) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerLow
+                    },
+                    border = BorderStroke(
+                        1.dp,
+                        if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = plugin.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (plugin.isInstalled) "v${plugin.version}" else stringResource(R.string.plugins_not_installed),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isActive) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                } else if (!plugin.isInstalled) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                        if (isActive) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1437,13 +1510,12 @@ private fun CharacterRowCard(
     val jpVa = character.voiceActors.firstOrNull { it.language.equals("Japanese", ignoreCase = true) }
         ?: character.voiceActors.firstOrNull()
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 5.dp)
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        modifier = Modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
@@ -1460,8 +1532,9 @@ private fun CharacterRowCard(
                     model = character.image,
                     contentDescription = character.name,
                     modifier = Modifier
-                        .size(52.dp)
-                        .clip(CircleShape),
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                     contentScale = ContentScale.Crop
                 )
                 Spacer(modifier = Modifier.width(10.dp))
@@ -1469,13 +1542,14 @@ private fun CharacterRowCard(
                     Text(
                         text = character.name,
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (!character.role.isNullOrBlank()) {
+                    character.role?.takeIf { it.isNotBlank() }?.let {
                         Text(
-                            text = character.role,
+                            text = it,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -1485,20 +1559,19 @@ private fun CharacterRowCard(
 
             if (jpVa != null) {
                 Spacer(modifier = Modifier.width(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
                             text = jpVa.name,
                             style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 120.dp)
                         )
-                        if (!jpVa.language.isNullOrBlank()) {
+                        jpVa.language?.let {
                             Text(
-                                text = jpVa.language,
+                                text = it,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1510,8 +1583,9 @@ private fun CharacterRowCard(
                             model = jpVa.image,
                             contentDescription = jpVa.name,
                             modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape),
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                             contentScale = ContentScale.Crop
                         )
                     }
@@ -1522,263 +1596,258 @@ private fun CharacterRowCard(
 }
 
 @Composable
-private fun CharacterDetailsSheet(
-    uiState: AnimeUiState,
+private fun CharacterDetailsSheetBody(
+    isLoading: Boolean,
+    character: MalCharacterDetails?,
+    pictures: List<MalPicture>,
     onDismiss: () -> Unit,
     onOpenAnime: (Int, String, String?) -> Unit
 ) {
-    var showSpoilers by remember(uiState.selectedCharacter?.characterId) { mutableStateOf(false) }
+    var showSpoilers by remember(character?.characterId) { mutableStateOf(false) }
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.82f),
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        shadowElevation = 16.dp
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .padding(top = 10.dp, bottom = 6.dp)
-                    .size(width = 44.dp, height = 4.dp)
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f), RoundedCornerShape(2.dp))
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = KanimeSpacing.lg),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = character?.name ?: stringResource(R.string.detail_character_title),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
             )
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Character Details",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = stringResource(R.string.action_close),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "Close")
-                }
             }
+        }
 
-            if (uiState.isLoadingCharacter) {
-                LoadingTabPlaceholder("Loading character from MyAnimeList...")
-            } else {
-                val char = uiState.selectedCharacter
-                if (char == null) {
-                    EmptyTabPlaceholder("Character details not found on MyAnimeList.")
-                } else {
-                    LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                        modifier = Modifier.fillMaxSize()
+        if (isLoading || character == null) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            }
+        } else {
+            LazyColumn(
+                contentPadding = PaddingValues(KanimeSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                item {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
                     ) {
-                        item {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                AsyncImage(
-                                    model = char.image,
-                                    contentDescription = char.name,
-                                    modifier = Modifier
-                                        .width(90.dp)
-                                        .height(126.dp)
-                                        .clip(RoundedCornerShape(14.dp)),
-                                    contentScale = ContentScale.Crop
-                                )
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        text = char.name,
-                                        style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    if (!char.nameKanji.isNullOrBlank()) {
-                                        Text(
-                                            text = char.nameKanji,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                    if (char.favorites != null) {
-                                        Text(
-                                            text = "♥ %,d Favorites".format(char.favorites),
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
+                        if (!character.image.isNullOrBlank()) {
+                            AsyncImage(
+                                model = character.image,
+                                contentDescription = character.name,
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                contentScale = ContentScale.Crop
+                            )
                         }
-
-                        if (!char.about.isNullOrBlank()) {
-                            item {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            character.nameKanji?.takeIf { it.isNotBlank() }?.let {
                                 Text(
-                                    text = "Biography",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = char.about,
+                                    text = it,
                                     style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            character.favorites?.let {
+                                Text(
+                                    text = "%,d favorites".format(it),
+                                    style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
+                    }
+                }
 
-                        if (char.spoilers.isNotEmpty()) {
-                            item {
-                                OutlinedButton(
-                                    onClick = { showSpoilers = !showSpoilers },
-                                    shape = RoundedCornerShape(10.dp)
+                if (!character.about.isNullOrBlank()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.detail_biography),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = character.about,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                if (character.spoilers.isNotEmpty()) {
+                    item {
+                        GlassButton(
+                            text = if (showSpoilers) {
+                                stringResource(R.string.detail_spoilers_hide)
+                            } else {
+                                stringResource(R.string.detail_spoilers_show, character.spoilers.size)
+                            },
+                            icon = if (showSpoilers) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            style = GlassButtonStyle.Tonal,
+                            onClick = { showSpoilers = !showSpoilers }
+                        )
+                        if (showSpoilers) {
+                            Spacer(modifier = Modifier.height(KanimeSpacing.sm))
+                            character.spoilers.forEach { spoiler ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f),
+                                    shape = MaterialTheme.shapes.small,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = if (showSpoilers) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
+                                    Text(
+                                        text = spoiler,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        modifier = Modifier.padding(10.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(if (showSpoilers) "Hide Spoilers (${char.spoilers.size})" else "Show Spoilers (${char.spoilers.size})")
                                 }
-                                if (showSpoilers) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    char.spoilers.forEach { spoiler ->
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
-                                            shape = RoundedCornerShape(10.dp),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 4.dp)
-                                        ) {
-                                            Text(
-                                                text = spoiler,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                modifier = Modifier.padding(10.dp)
+                            }
+                        }
+                    }
+                }
+
+                if (pictures.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.detail_gallery),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(KanimeSpacing.sm))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)) {
+                            items(pictures, key = { it.image }) { pic ->
+                                AsyncImage(
+                                    model = pic.image,
+                                    contentDescription = character.name,
+                                    modifier = Modifier
+                                        .width(92.dp)
+                                        .aspectRatio(2f / 3f)
+                                        .clip(MaterialTheme.shapes.small)
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (character.voiceActors.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.detail_voice_actors),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(KanimeSpacing.sm))
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            character.voiceActors.take(10).forEach { va ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    shape = MaterialTheme.shapes.small,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (!va.image.isNullOrBlank()) {
+                                            AsyncImage(
+                                                model = va.image,
+                                                contentDescription = va.name,
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .clip(CircleShape),
+                                                contentScale = ContentScale.Crop
                                             )
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                        }
+                                        Column {
+                                            Text(va.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                                            va.language?.let {
+                                                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                    }
+                }
 
-                        if (uiState.selectedCharacterPictures.isNotEmpty()) {
-                            item {
-                                Text(
-                                    text = "Gallery (${uiState.selectedCharacterPictures.size})",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    items(uiState.selectedCharacterPictures, key = { it.image }) { pic ->
-                                        AsyncImage(
-                                            model = pic.image,
-                                            contentDescription = char.name,
-                                            modifier = Modifier
-                                                .width(96.dp)
-                                                .height(136.dp)
-                                                .clip(RoundedCornerShape(10.dp)),
-                                            contentScale = ContentScale.Crop
+                if (character.animeography.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.detail_animeography),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(KanimeSpacing.sm))
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            character.animeography.take(12).forEach { entry ->
+                                Surface(
+                                    onClick = {
+                                        entry.animeId?.let { onOpenAnime(it, entry.title, entry.image) }
+                                    },
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    shape = MaterialTheme.shapes.small,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (!entry.image.isNullOrBlank()) {
+                                            AsyncImage(
+                                                model = entry.image,
+                                                contentDescription = entry.title,
+                                                modifier = Modifier
+                                                    .width(38.dp)
+                                                    .aspectRatio(2f / 3f)
+                                                    .clip(MaterialTheme.shapes.extraSmall),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                        }
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = entry.title,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            entry.role?.let {
+                                                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                            }
+                                        }
+                                        Icon(
+                                            imageVector = Icons.Default.ChevronRight,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                    }
-                                }
-                            }
-                        }
-
-                        if (char.voiceActors.isNotEmpty()) {
-                            item {
-                                Text(
-                                    text = "Voice Actors",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    char.voiceActors.take(10).forEach { va ->
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.surfaceVariant,
-                                            shape = RoundedCornerShape(10.dp),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                if (!va.image.isNullOrBlank()) {
-                                                    AsyncImage(
-                                                        model = va.image,
-                                                        contentDescription = va.name,
-                                                        modifier = Modifier
-                                                            .size(36.dp)
-                                                            .clip(CircleShape),
-                                                        contentScale = ContentScale.Crop
-                                                    )
-                                                    Spacer(modifier = Modifier.width(10.dp))
-                                                }
-                                                Column {
-                                                    Text(va.name, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                                                    va.language?.let {
-                                                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if (char.animeography.isNotEmpty()) {
-                            item {
-                                Text(
-                                    text = "Animeography",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    char.animeography.take(12).forEach { entry ->
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.surfaceVariant,
-                                            shape = RoundedCornerShape(10.dp),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable {
-                                                    entry.animeId?.let { onOpenAnime(it, entry.title, entry.image) }
-                                                }
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                if (!entry.image.isNullOrBlank()) {
-                                                    AsyncImage(
-                                                        model = entry.image,
-                                                        contentDescription = entry.title,
-                                                        modifier = Modifier
-                                                            .width(40.dp)
-                                                            .height(54.dp)
-                                                            .clip(RoundedCornerShape(6.dp)),
-                                                        contentScale = ContentScale.Crop
-                                                    )
-                                                    Spacer(modifier = Modifier.width(10.dp))
-                                                }
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = entry.title,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                    entry.role?.let {
-                                                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                                    }
-                                                }
-                                                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -1797,8 +1866,9 @@ private fun ThemeSongCard(
     onSpotifyClick: (String) -> Unit
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        shape = MaterialTheme.shapes.medium,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -1810,38 +1880,30 @@ private fun ThemeSongCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "$prefix • ${theme.title}",
+                    text = "$prefix · ${theme.title}",
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                val sub = buildString {
-                    if (theme.artist.isNotBlank()) append("by ${theme.artist}")
-                    if (!theme.episodes.isNullOrBlank()) {
-                        if (isNotEmpty()) append(" • ")
-                        append("eps ${theme.episodes}")
-                    }
-                }
-                if (sub.isNotBlank()) {
+                if (theme.artist.isNotBlank()) {
                     Text(
-                        text = sub,
+                        text = theme.artist,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
             if (!theme.spotifyUrl.isNullOrBlank()) {
                 Spacer(modifier = Modifier.width(8.dp))
-                FilledTonalButton(
-                    onClick = { onSpotifyClick(theme.spotifyUrl) },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Icon(Icons.Default.MusicNote, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Spotify", style = MaterialTheme.typography.labelSmall)
-                }
+                GlassIconButton(
+                    icon = Icons.Default.MusicNote,
+                    contentDescription = "Listen",
+                    size = 40.dp,
+                    onClick = { onSpotifyClick(theme.spotifyUrl) }
+                )
             }
         }
     }
@@ -1853,62 +1915,51 @@ private fun VideoCard(
     onClick: () -> Unit
 ) {
     val thumbUrl = video.youtubeId?.let { "https://img.youtube.com/vi/$it/hqdefault.jpg" }
-    Card(
+    Column(
         modifier = Modifier
-            .width(210.dp)
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            .width(204.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick)
     ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(118.dp)
-                    .background(Color.Black)
-            ) {
-                if (thumbUrl != null) {
-                    AsyncImage(
-                        model = thumbUrl,
-                        contentDescription = video.label,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.35f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayCircle,
-                        contentDescription = "Play Trailer",
-                        tint = Color.White,
-                        modifier = Modifier.size(40.dp)
-                    )
-                }
-            }
-            Column(modifier = Modifier.padding(10.dp)) {
-                Text(
-                    text = video.songTitle ?: video.label,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(MaterialTheme.shapes.medium)
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        ) {
+            if (thumbUrl != null) {
+                AsyncImage(
+                    model = thumbUrl,
+                    contentDescription = video.label,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
-                val sub = video.songArtist ?: video.label
-                if (sub.isNotBlank() && sub != (video.songTitle ?: video.label)) {
-                    Text(
-                        text = sub,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+            }
+            GlassSurface(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(40.dp),
+                shape = CircleShape,
+                overMedia = true,
+                showShadow = false
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = stringResource(R.string.action_play),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = video.songTitle ?: video.label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -1916,37 +1967,34 @@ private fun VideoCard(
 private fun LinkChipSection(
     title: String,
     links: List<MalLink>,
-    onLinkClick: (MalLink) -> Unit
+    onLinkClick: (MalLink) -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(vertical = KanimeSpacing.sm)
     ) {
         Text(
             text = title,
             style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(horizontal = horizontalPadding)
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(KanimeSpacing.sm))
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm),
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
+                .padding(horizontal = horizontalPadding)
         ) {
             links.forEach { link ->
-                AssistChip(
-                    onClick = { onLinkClick(link) },
-                    label = { Text(link.name, maxLines = 1) },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    },
-                    shape = RoundedCornerShape(10.dp)
+                GlassChip(
+                    label = link.name,
+                    leadingIcon = Icons.AutoMirrored.Filled.OpenInNew,
+                    selected = false,
+                    onClick = { onLinkClick(link) }
                 )
             }
         }
@@ -1958,48 +2006,34 @@ private fun RecommendationCard(
     rec: MalRecommendation,
     onClick: () -> Unit
 ) {
-    Card(
+    Column(
         modifier = Modifier
-            .width(136.dp)
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            .width(128.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick)
     ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(180.dp)
-            ) {
-                AsyncImage(
-                    model = rec.image,
-                    contentDescription = rec.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-                Surface(
-                    color = Color.Black.copy(alpha = 0.7f),
-                    shape = RoundedCornerShape(topStart = 8.dp),
-                    modifier = Modifier.align(Alignment.BottomEnd)
-                ) {
-                    Text(
-                        text = "${rec.votes} recs",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-            Text(
-                text = rec.title,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(8.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .clip(MaterialTheme.shapes.medium)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+        ) {
+            AsyncImage(
+                model = rec.image,
+                contentDescription = rec.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
             )
         }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = rec.title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -2007,21 +2041,68 @@ private fun RecommendationCard(
 private fun InfoRow(label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(16.dp))
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+@Preview(name = "Detail Light Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.PHONE)
+@Preview(name = "Detail Dark Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, device = Devices.PHONE)
+@Preview(name = "Detail Light Tablet", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.TABLET)
+@Preview(name = "Detail Dark Foldable", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, device = Devices.FOLDABLE)
+@Composable
+private fun DetailScreenPreview() {
+    val sample = AnimeRepository.sampleAnimes.first()
+    val eps = listOf(
+        Episode("1", 1, "The Journey's End", "24m", sample.bannerUrl),
+        Episode("2", 2, "It Didn't Have to Be Magic", "24m", sample.bannerUrl)
+    )
+    KAnimeTheme(animateTransition = false) {
+        KanimeAmbientBackdrop {
+            DetailScreenContent(
+                anime = sample,
+                displayEpisodes = eps,
+                isInWatchlist = true,
+                isLoadingDetails = false,
+                isLoadingExtras = false,
+                extras = AnimeExtras(),
+                selectedTab = 0,
+                onSelectTab = {},
+                sourceAvailability = SourceAvailabilityState.Available("KAnikoto", eps.size),
+                activeSourceShortName = "KAnikoto",
+                availablePlugins = emptyList(),
+                activeSourceId = "kanikoto",
+                showSourceSheet = false,
+                onShowSourceSheet = {},
+                showCharacterSheet = false,
+                isLoadingCharacter = false,
+                selectedCharacter = null,
+                selectedCharacterPictures = emptyList(),
+                onBackClick = {},
+                onRefresh = {},
+                onToggleWatchlist = {},
+                onPlayEpisode = {},
+                onSwitchPlugin = {},
+                onOpenCharacter = {},
+                onCloseCharacter = {},
+                onOpenAnimeByMalId = { _, _, _ -> },
+                onOpenExternalUrl = {}
+            )
+        }
     }
 }

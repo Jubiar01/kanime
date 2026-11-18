@@ -1,31 +1,76 @@
 package com.kanime.app.ui.screens
 
+import android.content.res.Configuration
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Devices
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.kanime.app.R
 import com.kanime.app.data.api.WatchHistoryEntry
+import com.kanime.app.data.model.Anime
+import com.kanime.app.data.repository.AnimeRepository
 import com.kanime.app.ui.components.AnimeCard
+import com.kanime.app.ui.components.EmptyStateView
+import com.kanime.app.ui.components.GlassChip
+import com.kanime.app.ui.components.GlassSurface
+import com.kanime.app.ui.theme.KAnimeTheme
+import com.kanime.app.ui.theme.KanimeAmbientBackdrop
+import com.kanime.app.ui.theme.KanimeSpacing
+import com.kanime.app.ui.theme.KanimeWindowWidthSizeClass
+import com.kanime.app.ui.theme.LocalWindowSizeClass
+import com.kanime.app.ui.theme.PillShape
 import com.kanime.app.ui.viewmodel.AnimeUiState
 import com.kanime.app.ui.viewmodel.AnimeViewModel
 import com.kanime.app.ui.viewmodel.NavTab
@@ -37,11 +82,10 @@ private enum class WatchlistTab {
 @Composable
 fun WatchlistScreen(
     viewModel: AnimeViewModel,
-    uiState: AnimeUiState
+    uiState: AnimeUiState,
+    topContentPadding: Dp = 12.dp,
+    bottomContentPadding: Dp = KanimeSpacing.floatingBarClearance
 ) {
-    var activeTab by remember { mutableStateOf(WatchlistTab.SAVED) }
-    var showClearHistoryDialog by remember { mutableStateOf(false) }
-
     val watchlistAnime = remember(uiState.savedWatchlist, uiState.watchlistIds) {
         if (uiState.savedWatchlist.isNotEmpty()) {
             uiState.savedWatchlist
@@ -49,99 +93,104 @@ fun WatchlistScreen(
             viewModel.allAnime.filter { uiState.watchlistIds.contains(it.id) }
         }
     }
-    val historyItems = uiState.watchHistory
+
+    WatchlistScreenContent(
+        watchlistAnime = watchlistAnime,
+        historyItems = uiState.watchHistory,
+        onOpenAnime = { viewModel.openAnime(it) },
+        onResumeHistory = { viewModel.resumeFromHistory(it) },
+        onRemoveHistory = { viewModel.removeHistoryItem(it) },
+        onClearHistory = { viewModel.clearWatchHistory() },
+        onNavigateExplore = { viewModel.selectTab(NavTab.EXPLORE) },
+        onNavigateHome = { viewModel.selectTab(NavTab.HOME) },
+        topContentPadding = topContentPadding,
+        bottomContentPadding = bottomContentPadding
+    )
+}
+
+@Composable
+internal fun WatchlistScreenContent(
+    watchlistAnime: List<Anime>,
+    historyItems: List<WatchHistoryEntry>,
+    onOpenAnime: (Anime) -> Unit,
+    onResumeHistory: (WatchHistoryEntry) -> Unit,
+    onRemoveHistory: (String) -> Unit,
+    onClearHistory: () -> Unit,
+    onNavigateExplore: () -> Unit,
+    onNavigateHome: () -> Unit,
+    topContentPadding: Dp = 12.dp,
+    bottomContentPadding: Dp = KanimeSpacing.floatingBarClearance
+) {
+    val windowSize = LocalWindowSizeClass.current
+    val horizontalPad = when (windowSize.widthSizeClass) {
+        KanimeWindowWidthSizeClass.Compact -> KanimeSpacing.lg
+        KanimeWindowWidthSizeClass.Medium -> KanimeSpacing.xl
+        KanimeWindowWidthSizeClass.Expanded -> KanimeSpacing.xxl
+    }
+    val minCellSize = when (windowSize.widthSizeClass) {
+        KanimeWindowWidthSizeClass.Compact -> 138.dp
+        KanimeWindowWidthSizeClass.Medium -> 152.dp
+        KanimeWindowWidthSizeClass.Expanded -> 164.dp
+    }
+
+    var activeTab by remember { mutableStateOf(WatchlistTab.SAVED) }
+    var showClearHistoryDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp)
+            .padding(top = topContentPadding)
     ) {
-        Spacer(modifier = Modifier.height(16.dp))
+        // Minimal Header + Segmented Chips
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = horizontalPad),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "My Watchlist",
+                text = stringResource(R.string.library_title),
                 style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
+                color = MaterialTheme.colorScheme.onBackground
             )
+
             if (activeTab == WatchlistTab.HISTORY && historyItems.isNotEmpty()) {
-                TextButton(
-                    onClick = { showClearHistoryDialog = true },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                ) {
+                TextButton(onClick = { showClearHistoryDialog = true }) {
                     Icon(
                         imageVector = Icons.Default.DeleteSweep,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Clear All", fontWeight = FontWeight.SemiBold)
-                }
-            } else {
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        text = if (activeTab == WatchlistTab.SAVED) "${watchlistAnime.size} Saved" else "${historyItems.size} Watched",
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text(stringResource(R.string.action_clear))
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(KanimeSpacing.md))
 
-        // Saved / History Tabs
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = horizontalPad),
+            horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
         ) {
-            FilterChip(
+            GlassChip(
+                label = "${stringResource(R.string.library_saved)} (${watchlistAnime.size})",
+                leadingIcon = Icons.Default.Bookmark,
                 selected = activeTab == WatchlistTab.SAVED,
-                onClick = { activeTab = WatchlistTab.SAVED },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Bookmark,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                label = {
-                    Text(
-                        text = "Saved (${watchlistAnime.size})",
-                        fontWeight = FontWeight.SemiBold
-                    )
-                },
-                modifier = Modifier.weight(1f)
+                onClick = { activeTab = WatchlistTab.SAVED }
             )
-            FilterChip(
+            GlassChip(
+                label = "${stringResource(R.string.library_history)} (${historyItems.size})",
+                leadingIcon = Icons.Default.History,
                 selected = activeTab == WatchlistTab.HISTORY,
-                onClick = { activeTab = WatchlistTab.HISTORY },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.History,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                label = {
-                    Text(
-                        text = "History (${historyItems.size})",
-                        fontWeight = FontWeight.SemiBold
-                    )
-                },
-                modifier = Modifier.weight(1f)
+                onClick = { activeTab = WatchlistTab.HISTORY }
             )
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(KanimeSpacing.md))
 
         when (activeTab) {
             WatchlistTab.SAVED -> {
@@ -149,55 +198,35 @@ fun WatchlistScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(bottom = 90.dp),
+                            .padding(bottom = bottomContentPadding),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.BookmarkBorder,
-                                contentDescription = null,
-                                modifier = Modifier.size(64.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "Your Watchlist is Empty",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Explore top shows and tap bookmark to add them here",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = { viewModel.selectTab(NavTab.EXPLORE) },
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.Explore, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Browse Trending Anime")
-                            }
-                        }
+                        EmptyStateView(
+                            icon = Icons.Default.BookmarkBorder,
+                            title = stringResource(R.string.library_empty_saved_title),
+                            subtitle = stringResource(R.string.library_empty_saved_body),
+                            actionLabel = stringResource(R.string.library_empty_saved_cta),
+                            onAction = onNavigateExplore
+                        )
                     }
                 } else {
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        contentPadding = PaddingValues(bottom = 90.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        columns = GridCells.Adaptive(minSize = minCellSize),
+                        contentPadding = PaddingValues(
+                            start = horizontalPad,
+                            end = horizontalPad,
+                            top = KanimeSpacing.xs,
+                            bottom = bottomContentPadding
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.md),
+                        verticalArrangement = Arrangement.spacedBy(KanimeSpacing.lg),
                         modifier = Modifier.fillMaxSize()
                     ) {
                         items(watchlistAnime, key = { it.id }) { anime ->
                             AnimeCard(
                                 anime = anime,
                                 modifier = Modifier.fillMaxWidth(),
-                                onClick = { viewModel.openAnime(anime) }
+                                onClick = { onOpenAnime(anime) }
                             )
                         }
                     }
@@ -209,54 +238,34 @@ fun WatchlistScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(bottom = 90.dp),
+                            .padding(bottom = bottomContentPadding),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = null,
-                                modifier = Modifier.size(64.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "No Watch History Yet",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Episodes you watch will appear here so you can resume anytime",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = { viewModel.selectTab(NavTab.HOME) },
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Start Watching")
-                            }
-                        }
+                        EmptyStateView(
+                            icon = Icons.Default.History,
+                            title = stringResource(R.string.library_empty_history_title),
+                            subtitle = stringResource(R.string.library_empty_history_body),
+                            actionLabel = stringResource(R.string.library_empty_history_cta),
+                            onAction = onNavigateHome
+                        )
                     }
                 } else {
                     LazyColumn(
-                        contentPadding = PaddingValues(bottom = 90.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(
+                            start = horizontalPad,
+                            end = horizontalPad,
+                            top = KanimeSpacing.xs,
+                            bottom = bottomContentPadding
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md),
                         modifier = Modifier.fillMaxSize()
                     ) {
                         items(historyItems, key = { "${it.anime.id}_${it.episodeNumber}" }) { entry ->
                             WatchHistoryCard(
                                 entry = entry,
-                                onResumeClick = { viewModel.resumeFromHistory(entry) },
-                                onDetailsClick = { viewModel.openAnime(entry.anime) },
-                                onRemoveClick = { viewModel.removeHistoryItem(entry.anime.id) }
+                                onResumeClick = { onResumeHistory(entry) },
+                                onDetailsClick = { onOpenAnime(entry.anime) },
+                                onRemoveClick = { onRemoveHistory(entry.anime.id) }
                             )
                         }
                     }
@@ -268,19 +277,20 @@ fun WatchlistScreen(
     if (showClearHistoryDialog) {
         AlertDialog(
             onDismissRequest = { showClearHistoryDialog = false },
-            title = { Text("Clear Watch History?") },
-            text = { Text("This will remove all saved watch progress and resume points from your history.") },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text(stringResource(R.string.library_clear_history_title)) },
+            text = { Text(stringResource(R.string.library_clear_history_body)) },
             confirmButton = {
                 Button(onClick = {
-                    viewModel.clearWatchHistory()
+                    onClearHistory()
                     showClearHistoryDialog = false
                 }) {
-                    Text("Clear")
+                    Text(stringResource(R.string.action_clear))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showClearHistoryDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
         )
@@ -294,26 +304,28 @@ private fun WatchHistoryCard(
     onDetailsClick: () -> Unit,
     onRemoveClick: () -> Unit
 ) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onResumeClick() }
+            .clip(MaterialTheme.shapes.large)
+            .clickable(onClick = onResumeClick)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(10.dp),
+                .padding(KanimeSpacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 16:9 Thumbnail with Play Overlay & Progress Bar
+            // 16:9 Thumbnail with Glass Play Pill & Progress Track
             Box(
                 modifier = Modifier
-                    .width(136.dp)
+                    .width(128.dp)
                     .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFF1A1A22))
+                    .clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             ) {
                 AsyncImage(
                     model = entry.episodeThumbnail.ifBlank { entry.anime.bannerUrl.ifBlank { entry.anime.coverUrl } },
@@ -321,60 +333,51 @@ private fun WatchHistoryCard(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f))
-                            )
-                        )
-                )
-                // Centered play badge
-                Surface(
-                    color = Color.Black.copy(alpha = 0.6f),
-                    shape = CircleShape,
+
+                GlassSurface(
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .size(34.dp)
+                        .size(34.dp),
+                    shape = CircleShape,
+                    overMedia = true,
+                    showShadow = false
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "Resume",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-                // Episode pill top-left
-                Surface(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                    shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(6.dp)
-                ) {
-                    Text(
-                        text = "EP ${entry.episodeNumber}",
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = stringResource(R.string.action_resume),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
-                // Progress bar along bottom edge
+
+                GlassSurface(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp),
+                    shape = PillShape,
+                    overMedia = true,
+                    showShadow = false
+                ) {
+                    Text(
+                        text = stringResource(R.string.episode_label, entry.episodeNumber),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                    )
+                }
+
                 if (entry.durationMs > 0L) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
                             .fillMaxWidth()
                             .height(3.5.dp)
-                            .background(Color.White.copy(alpha = 0.25f))
+                            .background(MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.45f))
                     ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth(entry.progressFraction.coerceIn(0.03f, 1f))
+                                .fillMaxWidth(entry.progressFraction.coerceIn(0.04f, 1f))
                                 .fillMaxHeight()
                                 .background(MaterialTheme.colorScheme.primary)
                         )
@@ -382,7 +385,7 @@ private fun WatchHistoryCard(
                 }
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(KanimeSpacing.md))
 
             Column(
                 modifier = Modifier.weight(1f),
@@ -391,62 +394,56 @@ private fun WatchHistoryCard(
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = entry.anime.title,
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(
                         onClick = onRemoveClick,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
-                            contentDescription = "Remove from history",
+                            contentDescription = stringResource(R.string.cd_remove_history),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(16.dp)
                         )
                     }
                 }
 
+                val progressLabel = when {
+                    entry.isNearlyFinished -> stringResource(R.string.history_completed)
+                    entry.positionMs > 0L && entry.durationMs > 0L ->
+                        "${formatDurationMs(entry.positionMs)} / ${formatDurationMs(entry.durationMs)}"
+                    entry.positionMs > 0L -> formatDurationMs(entry.positionMs)
+                    else -> stringResource(R.string.history_started)
+                }
                 Text(
-                    text = "Ep ${entry.episodeNumber}: ${entry.episodeTitle}",
+                    text = "$progressLabel · ${formatRelativeTime(entry.watchedAtMs)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                val progressLabel = when {
-                    entry.isNearlyFinished -> "Completed"
-                    entry.positionMs > 0L && entry.durationMs > 0L ->
-                        "${formatDurationMs(entry.positionMs)} / ${formatDurationMs(entry.durationMs)}"
-                    entry.positionMs > 0L -> "At ${formatDurationMs(entry.positionMs)}"
-                    else -> "Started"
-                }
-                Text(
-                    text = "$progressLabel • ${formatRelativeTime(entry.watchedAtMs)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Medium
-                )
-
                 Spacer(modifier = Modifier.height(2.dp))
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     FilledTonalButton(
                         onClick = onResumeClick,
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                        modifier = Modifier.height(30.dp),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = PillShape,
+                        modifier = Modifier.height(34.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
@@ -455,20 +452,19 @@ private fun WatchHistoryCard(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (entry.isNearlyFinished) "Replay" else "Resume",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold
+                            text = stringResource(if (entry.isNearlyFinished) R.string.action_replay else R.string.action_resume),
+                            style = MaterialTheme.typography.labelMedium
                         )
                     }
 
                     TextButton(
                         onClick = onDetailsClick,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier = Modifier.height(30.dp)
+                        modifier = Modifier.height(34.dp)
                     ) {
                         Text(
-                            text = "Details",
-                            style = MaterialTheme.typography.labelSmall
+                            text = stringResource(R.string.action_details),
+                            style = MaterialTheme.typography.labelMedium
                         )
                     }
                 }
@@ -485,13 +481,35 @@ private fun formatDurationMs(ms: Long): String {
 }
 
 private fun formatRelativeTime(timestampMs: Long): String {
-    if (timestampMs <= 0L) return "Recently"
+    if (timestampMs <= 0L) return "Now"
     val diffSec = ((System.currentTimeMillis() - timestampMs) / 1000L).coerceAtLeast(0L)
     return when {
-        diffSec < 60L -> "Just now"
-        diffSec < 3600L -> "${diffSec / 60L}m ago"
-        diffSec < 86400L -> "${diffSec / 3600L}h ago"
-        diffSec < 172800L -> "Yesterday"
-        else -> "${diffSec / 86400L}d ago"
+        diffSec < 60L -> "Now"
+        diffSec < 3600L -> "${diffSec / 60L}m"
+        diffSec < 86400L -> "${diffSec / 3600L}h"
+        diffSec < 172800L -> "1d"
+        else -> "${diffSec / 86400L}d"
+    }
+}
+
+@Preview(name = "Library Light Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.PHONE)
+@Preview(name = "Library Dark Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, device = Devices.PHONE)
+@Preview(name = "Library Light Tablet", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.TABLET)
+@Preview(name = "Library Dark Foldable", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, device = Devices.FOLDABLE)
+@Composable
+private fun WatchlistScreenPreview() {
+    KAnimeTheme(animateTransition = false) {
+        KanimeAmbientBackdrop {
+            WatchlistScreenContent(
+                watchlistAnime = AnimeRepository.sampleAnimes,
+                historyItems = emptyList(),
+                onOpenAnime = {},
+                onResumeHistory = {},
+                onRemoveHistory = {},
+                onClearHistory = {},
+                onNavigateExplore = {},
+                onNavigateHome = {}
+            )
+        }
     }
 }

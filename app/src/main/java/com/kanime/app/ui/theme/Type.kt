@@ -17,33 +17,37 @@ val GeistFontFamily = FontFamily(
     Font(R.font.geist_black, FontWeight.Black)
 )
 
+/**
+ * Full Material 3 type scale mapped exclusively to Geist.
+ * Tuned for high readability up to 200% font scale and crisp editorial hierarchy.
+ */
 val Typography = Typography(
     displayLarge = TextStyle(
         fontFamily = GeistFontFamily,
-        fontWeight = FontWeight.Bold,
-        fontSize = 34.sp,
-        lineHeight = 42.sp,
-        letterSpacing = (-0.5).sp
+        fontWeight = FontWeight.Black,
+        fontSize = 40.sp,
+        lineHeight = 48.sp,
+        letterSpacing = (-0.75).sp
     ),
     displayMedium = TextStyle(
         fontFamily = GeistFontFamily,
-        fontWeight = FontWeight.Bold,
-        fontSize = 28.sp,
-        lineHeight = 36.sp,
-        letterSpacing = (-0.3).sp
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = 32.sp,
+        lineHeight = 40.sp,
+        letterSpacing = (-0.5).sp
     ),
     displaySmall = TextStyle(
         fontFamily = GeistFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 24.sp,
-        lineHeight = 32.sp,
-        letterSpacing = (-0.2).sp
+        fontWeight = FontWeight.Bold,
+        fontSize = 26.sp,
+        lineHeight = 34.sp,
+        letterSpacing = (-0.3).sp
     ),
     headlineLarge = TextStyle(
         fontFamily = GeistFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 26.sp,
-        lineHeight = 32.sp,
+        lineHeight = 34.sp,
         letterSpacing = (-0.3).sp
     ),
     headlineMedium = TextStyle(
@@ -55,9 +59,9 @@ val Typography = Typography(
     ),
     headlineSmall = TextStyle(
         fontFamily = GeistFontFamily,
-        fontWeight = FontWeight.Bold,
+        fontWeight = FontWeight.SemiBold,
         fontSize = 19.sp,
-        lineHeight = 25.sp,
+        lineHeight = 26.sp,
         letterSpacing = (-0.1).sp
     ),
     titleLarge = TextStyle(
@@ -91,22 +95,22 @@ val Typography = Typography(
     bodyMedium = TextStyle(
         fontFamily = GeistFontFamily,
         fontWeight = FontWeight.Normal,
-        fontSize = 13.sp,
-        lineHeight = 19.sp,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
         letterSpacing = 0.sp
     ),
     bodySmall = TextStyle(
         fontFamily = GeistFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
-        lineHeight = 17.sp,
+        lineHeight = 18.sp,
         letterSpacing = 0.1.sp
     ),
     labelLarge = TextStyle(
         fontFamily = GeistFontFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 13.sp,
-        lineHeight = 18.sp,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
         letterSpacing = 0.1.sp
     ),
     labelMedium = TextStyle(
@@ -119,8 +123,8 @@ val Typography = Typography(
     labelSmall = TextStyle(
         fontFamily = GeistFontFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = 10.sp,
-        lineHeight = 14.sp,
+        fontSize = 11.sp,
+        lineHeight = 15.sp,
         letterSpacing = 0.25.sp
     )
 )

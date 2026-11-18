@@ -1,36 +1,97 @@
 package com.kanime.app.ui.screens
 
+import android.content.res.Configuration
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.InstallMobile
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Devices
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.kanime.app.R
 import com.kanime.app.data.plugin.AnimeSourcePlugin
 import com.kanime.app.data.plugin.CatalogUpdateInfo
 import com.kanime.app.data.plugin.PluginManager
+import com.kanime.app.ui.components.GlassButton
+import com.kanime.app.ui.components.GlassButtonStyle
+import com.kanime.app.ui.components.GlassChip
+import com.kanime.app.ui.components.GlassSheet
+import com.kanime.app.ui.components.GlassTopBar
+import com.kanime.app.ui.theme.KAnimeTheme
+import com.kanime.app.ui.theme.KanimeAmbientBackdrop
+import com.kanime.app.ui.theme.KanimeSpacing
+import com.kanime.app.ui.theme.PillShape
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PluginsScreen(
     onBackClick: () -> Unit
@@ -43,8 +104,15 @@ fun PluginsScreen(
 
     var catalogUpdateInfo by remember { mutableStateOf<CatalogUpdateInfo?>(null) }
     var isCheckingCatalog by remember { mutableStateOf(false) }
+    var downloadingPluginId by remember { mutableStateOf<String?>(null) }
+    var downloadProgress by remember { mutableFloatStateOf(0f) }
+    var showConfigDialog by remember { mutableStateOf(false) }
+    var showAddJsonDialog by remember { mutableStateOf(false) }
+    var jsonInputText by remember { mutableStateOf("") }
+    var pluginToUpdate by remember { mutableStateOf<AnimeSourcePlugin?>(null) }
+    var preferredAudio by remember { mutableStateOf("Sub") }
+    var preferredServer by remember { mutableStateOf("MegaCloud") }
 
-    // Automatically re-check plugin install/uninstall status whenever screen resumes
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -52,1074 +120,745 @@ fun PluginsScreen(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Sync plugin install status and check online updates (Catalog Template + Plugin Updates) on launch
     LaunchedEffect(Unit) {
         PluginManager.checkPluginStatus(context)
-        val res = PluginManager.checkForCatalogUpdate(context)
-        res.onSuccess { info ->
+        PluginManager.checkForCatalogUpdate(context).onSuccess { info ->
             if (info.hasCatalogTemplateUpdate) {
                 catalogUpdateInfo = info
             }
         }
     }
 
-    val pluginUpdatesAvailable = remember(plugins) { plugins.filter { it.hasUpdate } }
-
-    var downloadingPluginId by remember { mutableStateOf<String?>(null) }
-    var downloadProgress by remember { mutableFloatStateOf(0f) }
-    var showConfigDialog by remember { mutableStateOf(false) }
-    var showAddJsonDialog by remember { mutableStateOf(false) }
-    var jsonInputText by remember { mutableStateOf("") }
-    var pluginToUpdate by remember { mutableStateOf<AnimeSourcePlugin?>(null) }
-
-    // Plugin Configuration state
-    var preferredAudio by remember { mutableStateOf("Sub") }
-    var preferredServer by remember { mutableStateOf("MegaCloud") }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Source Plugins", fontWeight = FontWeight.Bold)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable {
-                                catalogUpdateInfo = CatalogUpdateInfo(
-                                    hasUpdate = false,
-                                    currentVersion = configVersion,
-                                    newVersion = configVersion,
-                                    releaseNotes = PluginManager.catalogReleaseNotes,
-                                    remoteJson = "",
-                                    plugins = plugins
-                                )
-                            }
-                        ) {
-                            Text(
-                                text = if (pluginUpdatesAvailable.isNotEmpty()) {
-                                    "Template v$configVersion • ${pluginUpdatesAvailable.size} plugin update${if (pluginUpdatesAvailable.size > 1) "s" else ""}"
-                                } else {
-                                    "Template v$configVersion • Online Delivery"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (pluginUpdatesAvailable.isNotEmpty()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = "Release Notes",
-                                tint = if (pluginUpdatesAvailable.isNotEmpty()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(13.dp)
-                            )
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    // Check for online updates: both Catalog Template (new plugins) & Plugin Updates (new APK versions)
-                    IconButton(
-                        onClick = {
-                            coroutineScope.launch {
-                                isCheckingCatalog = true
-                                Toast.makeText(context, "Checking catalog template & plugin updates...", Toast.LENGTH_SHORT).show()
-                                val res = PluginManager.checkForCatalogUpdate(context)
-                                isCheckingCatalog = false
-                                res.onSuccess { info ->
-                                    when {
-                                        info.hasCatalogTemplateUpdate -> {
-                                            catalogUpdateInfo = info
-                                        }
-                                        info.hasPluginUpdates -> {
-                                            val summary = info.updatedPlugins.joinToString(", ") {
-                                                "${it.name} v${it.version}"
-                                            }
-                                            Toast.makeText(
-                                                context,
-                                                "Plugin update available: $summary",
-                                                Toast.LENGTH_LONG
-                                            ).show()
-                                        }
-                                        info.metadataUpdatedCount > 0 -> {
-                                            Toast.makeText(
-                                                context,
-                                                "Synced latest plugin info (${info.metadataUpdatedCount} updated).",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                        else -> {
-                                            Toast.makeText(
-                                                context,
-                                                "Catalog template (v${info.currentVersion}) and all plugins are up to date.",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                    }
-                                }.onFailure { err ->
-                                    Toast.makeText(context, "Update check failed: ${err.message}", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        },
-                        enabled = !isCheckingCatalog
-                    ) {
-                        if (isCheckingCatalog) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = "Check for Updates")
-                        }
-                    }
-
-                    // Add plugin from JSON
-                    IconButton(onClick = { showAddJsonDialog = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add Plugin JSON")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
-                    actionIconContentColor = MaterialTheme.colorScheme.onBackground
-                )
+    PluginsScreenContent(
+        plugins = plugins,
+        configVersion = configVersion,
+        isCheckingCatalog = isCheckingCatalog,
+        downloadingPluginId = downloadingPluginId,
+        downloadProgress = downloadProgress,
+        onBackClick = onBackClick,
+        onShowReleaseNotes = {
+            catalogUpdateInfo = CatalogUpdateInfo(
+                hasUpdate = false,
+                currentVersion = configVersion,
+                newVersion = configVersion,
+                releaseNotes = PluginManager.catalogReleaseNotes,
+                remoteJson = "",
+                plugins = plugins
             )
-        }
-    ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(top = 12.dp, bottom = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Dedicated Plugin Updates Banner (separate from Catalog Template updates)
-            if (pluginUpdatesAvailable.isNotEmpty()) {
-                item(key = "plugin_updates_banner") {
-                    Surface(
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.SystemUpdate,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Text(
-                                    text = "${pluginUpdatesAvailable.size} Plugin Update${if (pluginUpdatesAvailable.size > 1) "s" else ""} Available",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                                )
-                            }
-                            pluginUpdatesAvailable.forEach { updatable ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = updatable.name,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                                        )
-                                        Text(
-                                            text = "v${updatable.installedVersion ?: "?"} ➜ v${updatable.version} • ${updatable.apkSize}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Button(
-                                        onClick = { pluginToUpdate = updatable },
-                                        shape = RoundedCornerShape(10.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.tertiary,
-                                            contentColor = MaterialTheme.colorScheme.onTertiary
-                                        )
-                                    ) {
-                                        Text("Update", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            }
+        },
+        onCheckUpdates = {
+            coroutineScope.launch {
+                isCheckingCatalog = true
+                val res = PluginManager.checkForCatalogUpdate(context)
+                isCheckingCatalog = false
+                res.onSuccess { info ->
+                    when {
+                        info.hasCatalogTemplateUpdate -> catalogUpdateInfo = info
+                        info.hasPluginUpdates -> {
+                            val summary = info.updatedPlugins.joinToString(", ") { "${it.name} v${it.version}" }
+                            Toast.makeText(context, "Update: $summary", Toast.LENGTH_LONG).show()
+                        }
+                        info.metadataUpdatedCount > 0 -> {
+                            Toast.makeText(context, "Synced", Toast.LENGTH_SHORT).show()
+                        }
+                        else -> {
+                            Toast.makeText(context, "Up to date (v${info.currentVersion})", Toast.LENGTH_SHORT).show()
                         }
                     }
+                }.onFailure { err ->
+                    Toast.makeText(context, err.message ?: "Update check failed", Toast.LENGTH_SHORT).show()
                 }
             }
-
-            items(plugins, key = { it.id }) { plugin ->
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        // Title row with Material 3 Switch
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Surface(
-                                    color = when {
-                                        plugin.isInstalled && plugin.isEnabled -> MaterialTheme.colorScheme.primary
-                                        plugin.isInstalled -> MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
-                                        else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.size(46.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = if (plugin.isInstalled && plugin.isEnabled) Icons.Default.PlayCircle else Icons.Default.Extension,
-                                            contentDescription = null,
-                                            tint = Color.White
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = plugin.name,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Surface(
-                                            color = if (plugin.hasUpdate) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
-                                            shape = RoundedCornerShape(6.dp)
-                                        ) {
-                                            Text(
-                                                text = if (plugin.hasUpdate && plugin.installedVersion != null) {
-                                                    "v${plugin.installedVersion} ➜ v${plugin.version}"
-                                                } else {
-                                                    "v${plugin.version}"
-                                                },
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = if (plugin.hasUpdate) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = "${plugin.packageName} • ${plugin.apkSize}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.width(8.dp))
-
-                            // Material 3 Switch to toggle plugin ON/OFF
-                            Switch(
-                                checked = plugin.isInstalled && plugin.isEnabled,
-                                onCheckedChange = { enabled ->
-                                    PluginManager.setPluginEnabled(context, plugin.id, enabled)
-                                    Toast.makeText(
-                                        context,
-                                        if (enabled) "${plugin.name} turned ON" else "${plugin.name} turned OFF",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                },
-                                enabled = plugin.isInstalled,
-                                thumbContent = if (plugin.isInstalled) {
-                                    {
-                                        Icon(
-                                            imageVector = if (plugin.isEnabled) Icons.Default.Check else Icons.Default.Close,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(SwitchDefaults.IconSize)
-                                        )
-                                    }
-                                } else null
-                            )
-                        }
-
-                        // Live Status Badge Row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                color = when {
-                                    plugin.hasUpdate -> MaterialTheme.colorScheme.tertiaryContainer
-                                    plugin.isInstalled && plugin.isEnabled -> Color(0xFF4CAF50).copy(alpha = 0.18f)
-                                    plugin.isInstalled && !plugin.isEnabled -> MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)
-                                    plugin.isApkDownloaded -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
-                                    else -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
-                                },
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                ) {
-                                    when {
-                                        plugin.hasUpdate -> {
-                                            Icon(
-                                                Icons.Default.NewReleases,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "UPDATE AVAILABLE",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                        plugin.isInstalled && plugin.isEnabled -> {
-                                            Icon(
-                                                Icons.Default.CheckCircle,
-                                                contentDescription = null,
-                                                tint = Color(0xFF4CAF50),
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "INSTALLED • ACTIVE",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = Color(0xFF4CAF50),
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                        plugin.isInstalled && !plugin.isEnabled -> {
-                                            Icon(
-                                                Icons.Default.PauseCircleOutline,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "INSTALLED • DISABLED",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                        else -> {
-                                            Text(
-                                                text = if (plugin.isApkDownloaded) "READY TO INSTALL" else "NOT INSTALLED",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = if (plugin.isApkDownloaded) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.error,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (plugin.isInstalled) {
-                                Text(
-                                    text = when {
-                                        plugin.hasUpdate -> "v${plugin.installedVersion ?: "?"} ➜ v${plugin.version}"
-                                        plugin.isEnabled -> "Enabled for streaming"
-                                        else -> "Turned off"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = when {
-                                        plugin.hasUpdate -> MaterialTheme.colorScheme.tertiary
-                                        plugin.isEnabled -> MaterialTheme.colorScheme.primary
-                                        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
-                                    },
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-
-                        // Description
-                        Text(
-                            text = plugin.description,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.9f)
-                        )
-
-                        // Capabilities FlowRow
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            plugin.capabilities.forEach { cap ->
-                                Surface(
-                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text(
-                                        text = cap,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-                        }
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-
-                        // Dynamic Action Buttons with UPDATE & UNINSTALL support
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                when {
-                                    // Case 1: Plugin has an online update available
-                                    plugin.hasUpdate -> {
-                                        Button(
-                                            onClick = { pluginToUpdate = plugin },
-                                            modifier = Modifier.weight(1f),
-                                            shape = RoundedCornerShape(12.dp),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.tertiary
-                                            )
-                                        ) {
-                                            Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Update v${plugin.version}")
-                                        }
-
-                                        OutlinedButton(
-                                            onClick = {
-                                                PluginManager.uninstallPlugin(context, plugin)
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                            shape = RoundedCornerShape(12.dp),
-                                            colors = ButtonDefaults.outlinedButtonColors(
-                                                contentColor = MaterialTheme.colorScheme.error
-                                            )
-                                        ) {
-                                            Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Uninstall")
-                                        }
-                                    }
-
-                                    // Case 2: Plugin is installed and up-to-date
-                                    plugin.isInstalled -> {
-                                        FilledTonalButton(
-                                            onClick = { pluginToUpdate = plugin },
-                                            modifier = Modifier.weight(1f),
-                                            shape = RoundedCornerShape(12.dp)
-                                        ) {
-                                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Installed (v${plugin.installedVersion ?: plugin.version})")
-                                        }
-
-                                        // Uninstall button (Package & APK)
-                                        OutlinedButton(
-                                            onClick = {
-                                                PluginManager.uninstallPlugin(context, plugin)
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                            shape = RoundedCornerShape(12.dp),
-                                            colors = ButtonDefaults.outlinedButtonColors(
-                                                contentColor = MaterialTheme.colorScheme.error
-                                            )
-                                        ) {
-                                            Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Uninstall")
-                                        }
-                                    }
-
-                                    // Case 3: APK is downloaded in storage, ready to install
-                                    plugin.isApkDownloaded -> {
-                                        Button(
-                                            onClick = {
-                                                PluginManager.installPluginApk(context, plugin)
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                            shape = RoundedCornerShape(12.dp)
-                                        ) {
-                                            Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Install Plugin")
-                                        }
-
-                                        // Delete downloaded APK
-                                        OutlinedButton(
-                                            onClick = {
-                                                PluginManager.uninstallPlugin(context, plugin)
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                            shape = RoundedCornerShape(12.dp),
-                                            colors = ButtonDefaults.outlinedButtonColors(
-                                                contentColor = MaterialTheme.colorScheme.error
-                                            )
-                                        ) {
-                                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Delete APK")
-                                        }
-                                    }
-
-                                    // Case 4: Not installed, download purely online
-                                    else -> {
-                                        Button(
-                                            onClick = {
-                                                coroutineScope.launch {
-                                                    try {
-                                                        downloadingPluginId = plugin.id
-                                                        downloadProgress = 0f
-                                                        PluginManager.downloadPluginApk(context, plugin) { progress ->
-                                                            downloadProgress = progress
-                                                        }
-                                                    } finally {
-                                                        downloadingPluginId = null
-                                                    }
-                                                }
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                            shape = RoundedCornerShape(12.dp),
-                                            enabled = downloadingPluginId == null
-                                        ) {
-                                            Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(if (downloadingPluginId == plugin.id) "Downloading..." else "Download APK")
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Configure Button row
-                            OutlinedButton(
-                                onClick = { showConfigDialog = true },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Configure Plugin")
-                            }
-                        }
-
-                        // Download Progress bar
-                        AnimatedVisibility(visible = downloadingPluginId == plugin.id) {
-                            Column {
-                                LinearProgressIndicator(
-                                    progress = { downloadProgress },
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "Downloading ${plugin.apkFileName} (${(downloadProgress * 100).toInt()}%)...",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
+        },
+        onAddJsonClick = { showAddJsonDialog = true },
+        onTogglePlugin = { plugin, enabled ->
+            PluginManager.setPluginEnabled(context, plugin.id, enabled)
+        },
+        onDownloadPlugin = { plugin ->
+            coroutineScope.launch {
+                try {
+                    downloadingPluginId = plugin.id
+                    downloadProgress = 0f
+                    PluginManager.downloadPluginApk(context, plugin) { progress ->
+                        downloadProgress = progress
                     }
+                } finally {
+                    downloadingPluginId = null
                 }
             }
-        }
-    }
+        },
+        onInstallPlugin = { PluginManager.installPluginApk(context, it) },
+        onUninstallPlugin = { PluginManager.uninstallPlugin(context, it) },
+        onUpdateDetailsClick = { pluginToUpdate = it },
+        onConfigureClick = { showConfigDialog = true }
+    )
 
-    // ══════════════════════════════════════════════════════════════
-    // PLUGIN UPDATE & DETAILS DIALOG
-    // ══════════════════════════════════════════════════════════════
-    if (pluginToUpdate != null) {
-        val targetPlugin = pluginToUpdate!!
+    // Plugin Update / Reinstall Dialog
+    pluginToUpdate?.let { target ->
         AlertDialog(
             onDismissRequest = { pluginToUpdate = null },
-            icon = {
-                Icon(
-                    Icons.Default.SystemUpdate,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(36.dp)
-                )
-            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = {
                 Text(
-                    text = if (targetPlugin.hasUpdate) "Update Available" else "Plugin Details & Reinstall",
-                    fontWeight = FontWeight.Bold
+                    text = if (target.hasUpdate) stringResource(R.string.plugins_update_available) else target.name
                 )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.size(38.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Extension, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(targetPlugin.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                text = "Installed: v${targetPlugin.installedVersion ?: targetPlugin.version} ➜ Available: v${targetPlugin.version}",
-                                color = MaterialTheme.colorScheme.primary,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-
-                    Text("What's New in v${targetPlugin.version}:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = targetPlugin.changelog ?: "• Latest streaming stability updates and decryption optimizations.",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(12.dp)
-                        )
-                    }
-
+                Column(verticalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)) {
                     Text(
-                        text = "File: ${targetPlugin.apkFileName} (${targetPlugin.apkSize})\nSource: ${targetPlugin.apkDownloadUrl ?: "Online"}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        text = "v${target.installedVersion ?: target.version} → v${target.version} · ${target.apkSize}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = target.changelog ?: "Stability and extractor improvements.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        val p = targetPlugin
-                        pluginToUpdate = null
-                        coroutineScope.launch {
-                            try {
-                                downloadingPluginId = p.id
-                                downloadProgress = 0f
-                                PluginManager.downloadPluginApk(context, p) { progress ->
-                                    downloadProgress = progress
-                                }
-                            } finally {
-                                downloadingPluginId = null
+                Button(onClick = {
+                    val p = target
+                    pluginToUpdate = null
+                    coroutineScope.launch {
+                        try {
+                            downloadingPluginId = p.id
+                            downloadProgress = 0f
+                            PluginManager.downloadPluginApk(context, p) { progress ->
+                                downloadProgress = progress
                             }
+                        } finally {
+                            downloadingPluginId = null
                         }
                     }
-                ) {
-                    Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (targetPlugin.hasUpdate) "Update Now" else "Re-download & Install")
+                }) {
+                    Text(stringResource(if (target.hasUpdate) R.string.plugins_update_now else R.string.plugins_reinstall))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { pluginToUpdate = null }) {
-                    Text("Later")
+                    Text(stringResource(R.string.action_later))
                 }
             }
         )
     }
 
-    // Add / Edit Plugin JSON Dialog
+    // Add JSON Dialog
     if (showAddJsonDialog) {
         AlertDialog(
             onDismissRequest = { showAddJsonDialog = false },
-            title = { Text("Add / Edit Plugin (.json)") },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text(stringResource(R.string.plugins_add_json)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Paste plugin JSON configuration below to dynamically register or update an online library plugin:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = jsonInputText,
-                        onValueChange = { jsonInputText = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp),
-                        placeholder = {
-                            Text(
-                                "{\n  \"id\": \"kanikoto\",\n  \"name\": \"KAnikoto Extractor\",\n  \"packageName\": \"com.kanime.plugin.kanikoto\",\n  \"version\": \"1.2.0\",\n  \"apkDownloadUrl\": \"https://...\"\n}",
-                                fontSize = 11.sp
-                            )
-                        },
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
+                OutlinedTextField(
+                    value = jsonInputText,
+                    onValueChange = { jsonInputText = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp),
+                    placeholder = { Text("{\"id\":\"...\",\"name\":\"...\"}") },
+                    shape = MaterialTheme.shapes.small
+                )
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        if (jsonInputText.isNotBlank()) {
-                            val res = PluginManager.addPluginFromJson(context, jsonInputText)
-                            if (res.isSuccess) {
-                                Toast.makeText(context, "Plugin '${res.getOrNull()?.name}' saved successfully!", Toast.LENGTH_SHORT).show()
-                                showAddJsonDialog = false
-                                jsonInputText = ""
-                            } else {
-                                Toast.makeText(context, "JSON error: ${res.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
-                            }
+                Button(onClick = {
+                    if (jsonInputText.isNotBlank()) {
+                        val res = PluginManager.addPluginFromJson(context, jsonInputText)
+                        if (res.isSuccess) {
+                            Toast.makeText(context, "Saved", Toast.LENGTH_SHORT).show()
+                            showAddJsonDialog = false
+                            jsonInputText = ""
+                        } else {
+                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "Invalid JSON", Toast.LENGTH_LONG).show()
                         }
                     }
-                ) {
-                    Text("Save Plugin")
+                }) {
+                    Text(stringResource(R.string.action_save))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showAddJsonDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
         )
     }
 
-    // Plugin Configuration Dialog
+    // Plugin Config Dialog
     if (showConfigDialog) {
         AlertDialog(
             onDismissRequest = { showConfigDialog = false },
-            title = { Text("KAnikoto Plugin Settings") },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text(stringResource(R.string.plugins_configure)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("Preferred Audio Track", fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)) {
+                    Text(stringResource(R.string.player_audio), style = MaterialTheme.typography.labelLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)) {
                         listOf("Sub", "Dub").forEach { audio ->
-                            FilterChip(
+                            GlassChip(
+                                label = audio,
                                 selected = preferredAudio == audio,
-                                onClick = { preferredAudio = audio },
-                                label = { Text(audio) }
+                                onClick = { preferredAudio = audio }
                             )
                         }
                     }
-
-                    Text("Preferred Video Server", fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("MegaCloud", "Vidstream", "Kiwi CDN").forEach { server ->
-                            FilterChip(
-                                selected = preferredServer == server,
-                                onClick = { preferredServer = server },
-                                label = { Text(server) }
+                    Text(stringResource(R.string.player_servers), style = MaterialTheme.typography.labelLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)) {
+                        listOf("MegaCloud", "Vidstream").forEach { srv ->
+                            GlassChip(
+                                label = srv,
+                                selected = preferredServer == srv,
+                                onClick = { preferredServer = srv }
                             )
                         }
                     }
-
-                    Text("Active Source: KAnikoto Multi-Node", style = MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showConfigDialog = false }) {
-                    Text("Save & Close")
+                Button(onClick = { showConfigDialog = false }) {
+                    Text(stringResource(R.string.action_done))
                 }
             }
         )
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // CATALOG UPDATE & RELEASE NOTES BOTTOM SHEET
-    // ══════════════════════════════════════════════════════════════
-    if (catalogUpdateInfo != null) {
-        val info = catalogUpdateInfo!!
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-        ModalBottomSheet(
-            onDismissRequest = { catalogUpdateInfo = null },
-            sheetState = sheetState,
-            containerColor = MaterialTheme.colorScheme.surface,
-            dragHandle = { BottomSheetDefaults.DragHandle() },
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    // Catalog Update / Release Notes Glass Sheet
+    GlassSheet(
+        visible = catalogUpdateInfo != null,
+        onDismiss = { catalogUpdateInfo = null },
+        maxHeightFraction = 0.72f
+    ) {
+        val info = catalogUpdateInfo ?: return@GlassSheet
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = KanimeSpacing.lg)
+                .padding(bottom = KanimeSpacing.xl)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 32.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Header with icon and version status
+                Column {
+                    Text(
+                        text = stringResource(R.string.plugins_release_notes),
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "v${info.newVersion}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                IconButton(onClick = { catalogUpdateInfo = null }) {
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.action_close))
+                }
+            }
+
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = info.releaseNotes,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(KanimeSpacing.lg)
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
+            ) {
+                if (info.hasCatalogTemplateUpdate) {
+                    GlassButton(
+                        text = stringResource(R.string.plugins_apply_template),
+                        icon = Icons.Default.SystemUpdate,
+                        style = GlassButtonStyle.Primary,
+                        onClick = {
+                            PluginManager.applyCatalogUpdate(context, info)
+                            catalogUpdateInfo = null
+                            Toast.makeText(context, "Updated to v${info.newVersion}", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    GlassButton(
+                        text = stringResource(R.string.action_later),
+                        style = GlassButtonStyle.Glass,
+                        onClick = { catalogUpdateInfo = null }
+                    )
+                } else {
+                    GlassButton(
+                        text = stringResource(R.string.action_done),
+                        style = GlassButtonStyle.Primary,
+                        onClick = { catalogUpdateInfo = null },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun PluginsScreenContent(
+    plugins: List<AnimeSourcePlugin>,
+    configVersion: Int,
+    isCheckingCatalog: Boolean,
+    downloadingPluginId: String?,
+    downloadProgress: Float,
+    onBackClick: () -> Unit,
+    onShowReleaseNotes: () -> Unit,
+    onCheckUpdates: () -> Unit,
+    onAddJsonClick: () -> Unit,
+    onTogglePlugin: (AnimeSourcePlugin, Boolean) -> Unit,
+    onDownloadPlugin: (AnimeSourcePlugin) -> Unit,
+    onInstallPlugin: (AnimeSourcePlugin) -> Unit,
+    onUninstallPlugin: (AnimeSourcePlugin) -> Unit,
+    onUpdateDetailsClick: (AnimeSourcePlugin) -> Unit,
+    onConfigureClick: () -> Unit
+) {
+    val updates = remember(plugins) { plugins.filter { it.hasUpdate } }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            LazyColumn(
+                modifier = Modifier
+                    .widthIn(max = 760.dp)
+                    .fillMaxSize()
+                    .padding(horizontal = KanimeSpacing.lg),
+                contentPadding = PaddingValues(top = 76.dp, bottom = 48.dp),
+                verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
+            ) {
+                if (updates.isNotEmpty()) {
+                    item(key = "updates_banner") {
+                        Surface(
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            shape = MaterialTheme.shapes.large,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(KanimeSpacing.lg),
+                                verticalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.plugins_updates_available, updates.size),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                                updates.forEach { p ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "${p.name} · v${p.version}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Button(
+                                            onClick = { onUpdateDetailsClick(p) },
+                                            shape = PillShape,
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.tertiary,
+                                                contentColor = MaterialTheme.colorScheme.onTertiary
+                                            )
+                                        ) {
+                                            Text(stringResource(R.string.action_update))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                items(plugins, key = { it.id }) { plugin ->
+                    PluginCard(
+                        plugin = plugin,
+                        isDownloading = downloadingPluginId == plugin.id,
+                        anyDownloading = downloadingPluginId != null,
+                        downloadProgress = downloadProgress,
+                        onToggle = { onTogglePlugin(plugin, it) },
+                        onDownload = { onDownloadPlugin(plugin) },
+                        onInstall = { onInstallPlugin(plugin) },
+                        onUninstall = { onUninstallPlugin(plugin) },
+                        onUpdateDetails = { onUpdateDetailsClick(plugin) },
+                        onConfigure = onConfigureClick
+                    )
+                }
+            }
+        }
+
+        GlassTopBar(
+            navigationIcon = {
+                IconButton(onClick = onBackClick) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.action_back),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            },
+            title = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.clickable(onClick = onShowReleaseNotes)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
+                    Text(
+                        text = stringResource(R.string.plugins_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = PillShape
                     ) {
-                        Surface(
-                            color = if (info.hasUpdate) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.size(46.dp)
+                        Text(
+                            text = "v$configVersion",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            },
+            actions = {
+                IconButton(onClick = onCheckUpdates, enabled = !isCheckingCatalog) {
+                    if (isCheckingCatalog) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = stringResource(R.string.plugins_check_updates),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                IconButton(onClick = onAddJsonClick) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = stringResource(R.string.plugins_add_json),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            },
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PluginCard(
+    plugin: AnimeSourcePlugin,
+    isDownloading: Boolean,
+    anyDownloading: Boolean,
+    downloadProgress: Float,
+    onToggle: (Boolean) -> Unit,
+    onDownload: () -> Unit,
+    onInstall: () -> Unit,
+    onUninstall: () -> Unit,
+    onUpdateDetails: () -> Unit,
+    onConfigure: () -> Unit
+) {
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(KanimeSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Surface(
+                        color = if (plugin.isInstalled && plugin.isEnabled) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHighest
+                        },
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (plugin.isInstalled && plugin.isEnabled) Icons.Default.PlayCircle else Icons.Default.Extension,
+                                contentDescription = null,
+                                tint = if (plugin.isInstalled && plugin.isEnabled) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(KanimeSpacing.md))
+                    Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = if (info.hasUpdate) Icons.Default.NewReleases else Icons.Default.Description,
-                                    contentDescription = null,
-                                    tint = if (info.hasUpdate) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
-                                    modifier = Modifier.size(26.dp)
+                            Text(
+                                text = plugin.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            val statusBg = when {
+                                plugin.hasUpdate -> MaterialTheme.colorScheme.tertiaryContainer
+                                plugin.isInstalled && plugin.isEnabled -> MaterialTheme.colorScheme.primaryContainer
+                                plugin.isInstalled -> MaterialTheme.colorScheme.surfaceContainerHighest
+                                plugin.isApkDownloaded -> MaterialTheme.colorScheme.secondaryContainer
+                                else -> MaterialTheme.colorScheme.errorContainer
+                            }
+                            val statusFg = when {
+                                plugin.hasUpdate -> MaterialTheme.colorScheme.onTertiaryContainer
+                                plugin.isInstalled && plugin.isEnabled -> MaterialTheme.colorScheme.onPrimaryContainer
+                                plugin.isInstalled -> MaterialTheme.colorScheme.onSurfaceVariant
+                                plugin.isApkDownloaded -> MaterialTheme.colorScheme.onSecondaryContainer
+                                else -> MaterialTheme.colorScheme.onErrorContainer
+                            }
+                            val statusText = when {
+                                plugin.hasUpdate -> stringResource(R.string.plugins_update_available)
+                                plugin.isInstalled && plugin.isEnabled -> stringResource(R.string.plugins_active)
+                                plugin.isInstalled -> stringResource(R.string.plugins_disabled)
+                                plugin.isApkDownloaded -> stringResource(R.string.plugins_ready)
+                                else -> stringResource(R.string.plugins_not_installed)
+                            }
+                            Surface(color = statusBg, shape = PillShape) {
+                                Text(
+                                    text = statusText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = statusFg,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = if (info.hasCatalogTemplateUpdate) "Catalog Template Update" else "Catalog Template Info",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = when {
-                                    info.newVersion > info.currentVersion -> "Template v${info.currentVersion} ➜ Template v${info.newVersion}"
-                                    info.newPlugins.isNotEmpty() -> "${info.newPlugins.size} new plugin${if (info.newPlugins.size > 1) "s" else ""} added • Template v${info.newVersion}"
-                                    else -> "Current Template v${info.currentVersion}"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    Surface(
-                        color = if (info.hasUpdate) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
                         Text(
-                            text = if (info.hasUpdate) "UPDATE" else "CURRENT",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (info.hasUpdate) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            fontWeight = FontWeight.Bold
+                            text = "v${plugin.version} · ${plugin.apkSize}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-
-                // Release Notes Section
-                Text(
-                    text = "Release Notes & Changelog",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = plugin.isInstalled && plugin.isEnabled,
+                    onCheckedChange = onToggle,
+                    enabled = plugin.isInstalled,
+                    thumbContent = if (plugin.isInstalled) {
+                        {
                             Icon(
-                                Icons.Default.Campaign,
+                                imageVector = if (plugin.isEnabled) Icons.Default.Check else Icons.Default.Close,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "What's New in Config v${info.newVersion}",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                modifier = Modifier.size(SwitchDefaults.IconSize)
                             )
                         }
+                    } else null
+                )
+            }
 
-                        Text(
-                            text = info.releaseNotes,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.95f),
-                            lineHeight = 22.sp
-                        )
-                    }
-                }
-
-                // Included plugins preview
-                if (info.plugins.isNotEmpty()) {
-                    Text(
-                        text = "Available Sources (${info.plugins.size})",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    info.plugins.forEach { plugin ->
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Default.Extension,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    val isNewPlugin = info.newPlugins.any { it.id == plugin.id }
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = plugin.name,
-                                            fontWeight = FontWeight.Bold,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = if (plugin.hasUpdate && plugin.installedVersion != null) {
-                                                "v${plugin.installedVersion} ➜ v${plugin.version}"
-                                            } else {
-                                                "v${plugin.version}"
-                                            },
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (plugin.hasUpdate) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        if (isNewPlugin) {
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Surface(
-                                                color = MaterialTheme.colorScheme.primaryContainer,
-                                                shape = RoundedCornerShape(4.dp)
-                                            ) {
-                                                Text(
-                                                    text = "NEW",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        } else if (plugin.hasUpdate) {
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Surface(
-                                                color = MaterialTheme.colorScheme.tertiaryContainer,
-                                                shape = RoundedCornerShape(4.dp)
-                                            ) {
-                                                Text(
-                                                    text = "UPDATE",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        }
-                                    }
-                                    Text(
-                                        text = "${plugin.packageName} • ${plugin.apkSize}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                    )
-                                    if (!plugin.changelog.isNullOrBlank()) {
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = "• ${plugin.changelog}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Bottom Action buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+            if (plugin.capabilities.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    if (info.hasCatalogTemplateUpdate) {
-                        Button(
-                            onClick = {
-                                PluginManager.applyCatalogUpdate(context, info)
-                                catalogUpdateInfo = null
-                                Toast.makeText(context, "Catalog template updated to v${info.newVersion}!", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
+                    plugin.capabilities.forEach { cap ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                            shape = PillShape
                         ) {
-                            Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Apply Template")
-                        }
-
-                        OutlinedButton(
-                            onClick = { catalogUpdateInfo = null },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Later")
-                        }
-                    } else {
-                        Button(
-                            onClick = { catalogUpdateInfo = null },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Got it")
+                            Text(
+                                text = cap,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                            )
                         }
                     }
                 }
             }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
+            ) {
+                when {
+                    plugin.hasUpdate -> {
+                        Button(
+                            onClick = onUpdateDetails,
+                            shape = PillShape,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(stringResource(R.string.action_update))
+                        }
+                        OutlinedButton(
+                            onClick = onUninstall,
+                            shape = PillShape,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(stringResource(R.string.action_uninstall))
+                        }
+                    }
+
+                    plugin.isInstalled -> {
+                        FilledTonalButton(
+                            onClick = onConfigure,
+                            shape = PillShape,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(stringResource(R.string.plugins_configure))
+                        }
+                        OutlinedButton(
+                            onClick = onUninstall,
+                            shape = PillShape,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(stringResource(R.string.action_uninstall))
+                        }
+                    }
+
+                    plugin.isApkDownloaded -> {
+                        Button(
+                            onClick = onInstall,
+                            shape = PillShape,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(stringResource(R.string.action_install))
+                        }
+                        OutlinedButton(
+                            onClick = onUninstall,
+                            shape = PillShape,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(stringResource(R.string.action_delete))
+                        }
+                    }
+
+                    else -> {
+                        Button(
+                            onClick = onDownload,
+                            enabled = !anyDownloading,
+                            shape = PillShape,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(stringResource(if (isDownloading) R.string.plugins_downloading else R.string.action_download))
+                        }
+                    }
+                }
+            }
+
+            AnimatedVisibility(visible = isDownloading) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    LinearProgressIndicator(
+                        progress = { downloadProgress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(PillShape),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                    )
+                    Text(
+                        text = "${(downloadProgress * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Preview(name = "Plugins Light Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.PHONE)
+@Preview(name = "Plugins Dark Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, device = Devices.PHONE)
+@Preview(name = "Plugins Light Tablet", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.TABLET)
+@Composable
+private fun PluginsScreenPreview() {
+    val samplePlugins = listOf(
+        AnimeSourcePlugin(
+            id = "kanikoto",
+            name = "KAnikoto",
+            packageName = "com.kanime.plugin.kanikoto",
+            providerAuthority = "com.kanime.plugin.kanikoto.provider",
+            version = "1.4.0",
+            author = "Kanime",
+            description = "Multi-node anime streaming source.",
+            sourceUrl = "https://anikoto.to",
+            apkFileName = "kanikoto.apk",
+            capabilities = listOf("HLS", "Sub", "Dub"),
+            isInstalled = true,
+            isEnabled = true,
+            apkSize = "3.4 MB"
+        )
+    )
+    KAnimeTheme(animateTransition = false) {
+        KanimeAmbientBackdrop {
+            PluginsScreenContent(
+                plugins = samplePlugins,
+                configVersion = 4,
+                isCheckingCatalog = false,
+                downloadingPluginId = null,
+                downloadProgress = 0f,
+                onBackClick = {},
+                onShowReleaseNotes = {},
+                onCheckUpdates = {},
+                onAddJsonClick = {},
+                onTogglePlugin = { _, _ -> },
+                onDownloadPlugin = {},
+                onInstallPlugin = {},
+                onUninstallPlugin = {},
+                onUpdateDetailsClick = {},
+                onConfigureClick = {}
+            )
         }
     }
 }

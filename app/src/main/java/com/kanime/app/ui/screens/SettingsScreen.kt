@@ -1,41 +1,103 @@
 package com.kanime.app.ui.screens
 
+import android.content.res.Configuration
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.Cached
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PlayCircleOutline
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Devices
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.kanime.app.R
 import com.kanime.app.data.api.CatalogConfig
 import com.kanime.app.data.plugin.PluginManager
+import com.kanime.app.ui.components.GlassChip
 import com.kanime.app.ui.player.anime.AnimeSharpenStrength
 import com.kanime.app.ui.player.anime.AnimeUpscaleQuality
+import com.kanime.app.ui.theme.KAnimeTheme
+import com.kanime.app.ui.theme.KanimeAmbientBackdrop
+import com.kanime.app.ui.theme.KanimeSpacing
+import com.kanime.app.ui.theme.KanimeWindowWidthSizeClass
+import com.kanime.app.ui.theme.LocalWindowSizeClass
+import com.kanime.app.ui.theme.PillShape
+import com.kanime.app.ui.theme.ThemeMode
+import com.kanime.app.ui.theme.ThemePreferences
 import com.kanime.app.ui.viewmodel.AnimeUiState
 import com.kanime.app.ui.viewmodel.AnimeViewModel
 
 @Composable
 fun SettingsScreen(
     viewModel: AnimeViewModel,
-    uiState: AnimeUiState
+    uiState: AnimeUiState,
+    topContentPadding: Dp = 12.dp,
+    bottomContentPadding: Dp = KanimeSpacing.floatingBarClearance
 ) {
     val context = LocalContext.current
     val plugins by PluginManager.plugins.collectAsState()
+    val themeMode by ThemePreferences.themeModeFlow.collectAsState()
+    val dynamicColor by ThemePreferences.dynamicColorFlow.collectAsState()
     val tmdbApiKey by CatalogConfig.tmdbApiKeyFlow.collectAsState()
     val autoPlayNext by CatalogConfig.autoPlayNextFlow.collectAsState()
     val animeUpscaleEnabled by CatalogConfig.animeUpscaleEnabledFlow.collectAsState()
     val lineSharpeningEnabled by CatalogConfig.animeLineSharpeningFlow.collectAsState()
     val animeUpscaleQuality by CatalogConfig.animeUpscaleQualityFlow.collectAsState()
     val animeSharpenStrength by CatalogConfig.animeSharpenStrengthFlow.collectAsState()
+
     val activePluginCount = plugins.count { it.isInstalled && it.isEnabled }
     val pluginUpdateCount = plugins.count { it.hasUpdate }
 
@@ -44,457 +106,436 @@ fun SettingsScreen(
     }
 
     var showPluginsView by remember { mutableStateOf(false) }
-    var showTmdbDialog by remember { mutableStateOf(false) }
-    var tmdbInput by remember(tmdbApiKey) { mutableStateOf(tmdbApiKey) }
-    var cacheClearedBanner by remember { mutableStateOf(false) }
 
     if (showPluginsView) {
-        BackHandler {
-            showPluginsView = false
-        }
-        PluginsScreen(
-            onBackClick = { showPluginsView = false }
-        )
+        BackHandler { showPluginsView = false }
+        PluginsScreen(onBackClick = { showPluginsView = false })
         return
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 90.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            Text(
-                text = "Settings & About",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
-        }
+    SettingsScreenContent(
+        themeMode = themeMode,
+        dynamicColor = dynamicColor,
+        supportsDynamicColor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
+        activePluginCount = activePluginCount,
+        pluginUpdateCount = pluginUpdateCount,
+        autoPlayNext = autoPlayNext,
+        animeUpscaleEnabled = animeUpscaleEnabled,
+        animeUpscaleQuality = animeUpscaleQuality,
+        lineSharpeningEnabled = lineSharpeningEnabled,
+        animeSharpenStrength = animeSharpenStrength,
+        tmdbApiKey = tmdbApiKey,
+        onThemeModeChange = { ThemePreferences.setThemeMode(context, it) },
+        onDynamicColorChange = { ThemePreferences.setDynamicColor(context, it) },
+        onOpenPlugins = { showPluginsView = true },
+        onAutoPlayNextChange = { viewModel.setAutoPlayNext(it) },
+        onUpscaleEnabledChange = { viewModel.setAnimeUpscaleEnabled(it) },
+        onUpscaleQualityChange = { viewModel.setAnimeUpscaleQuality(it) },
+        onLineSharpeningChange = { viewModel.setAnimeLineSharpening(it) },
+        onSharpenStrengthChange = { viewModel.setAnimeSharpenStrength(it) },
+        onSaveTmdbKey = { viewModel.saveTmdbApiKey(it) },
+        onClearCache = { viewModel.clearCatalogCache() },
+        topContentPadding = topContentPadding,
+        bottomContentPadding = bottomContentPadding
+    )
+}
 
-        // Video Source Plugins
-        item {
-            Text(
-                text = "Streaming Sources & Plugins",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                onClick = { showPluginsView = true },
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
+@Composable
+internal fun SettingsScreenContent(
+    themeMode: ThemeMode,
+    dynamicColor: Boolean,
+    supportsDynamicColor: Boolean,
+    activePluginCount: Int,
+    pluginUpdateCount: Int,
+    autoPlayNext: Boolean,
+    animeUpscaleEnabled: Boolean,
+    animeUpscaleQuality: AnimeUpscaleQuality,
+    lineSharpeningEnabled: Boolean,
+    animeSharpenStrength: AnimeSharpenStrength,
+    tmdbApiKey: String,
+    onThemeModeChange: (ThemeMode) -> Unit,
+    onDynamicColorChange: (Boolean) -> Unit,
+    onOpenPlugins: () -> Unit,
+    onAutoPlayNextChange: (Boolean) -> Unit,
+    onUpscaleEnabledChange: (Boolean) -> Unit,
+    onUpscaleQualityChange: (AnimeUpscaleQuality) -> Unit,
+    onLineSharpeningChange: (Boolean) -> Unit,
+    onSharpenStrengthChange: (AnimeSharpenStrength) -> Unit,
+    onSaveTmdbKey: (String) -> Unit,
+    onClearCache: () -> Unit,
+    topContentPadding: Dp = 12.dp,
+    bottomContentPadding: Dp = KanimeSpacing.floatingBarClearance
+) {
+    val windowSize = LocalWindowSizeClass.current
+    val horizontalPad = when (windowSize.widthSizeClass) {
+        KanimeWindowWidthSizeClass.Compact -> KanimeSpacing.lg
+        KanimeWindowWidthSizeClass.Medium -> KanimeSpacing.xl
+        KanimeWindowWidthSizeClass.Expanded -> KanimeSpacing.xxl
+    }
+
+    var showAdvanced by remember { mutableStateOf(false) }
+    var showTmdbDialog by remember { mutableStateOf(false) }
+    var tmdbInput by remember(tmdbApiKey) { mutableStateOf(tmdbApiKey) }
+    var cacheCleared by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .widthIn(max = 760.dp)
+                .fillMaxSize()
+                .padding(horizontal = horizontalPad),
+            contentPadding = PaddingValues(top = topContentPadding, bottom = bottomContentPadding),
+            verticalArrangement = Arrangement.spacedBy(KanimeSpacing.lg)
+        ) {
+            item(key = "title") {
+                Text(
+                    text = stringResource(R.string.settings_title),
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+            }
+
+            // Appearance (Theme Mode + optional Dynamic Color)
+            item(key = "appearance") {
+                SettingsGroup(title = stringResource(R.string.settings_appearance)) {
+                    Column(
+                        modifier = Modifier.padding(KanimeSpacing.lg),
+                        verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
                     ) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.size(44.dp)
+                        Text(
+                            text = stringResource(R.string.settings_theme),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm),
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
+                            GlassChip(
+                                label = stringResource(R.string.settings_theme_system),
+                                selected = themeMode == ThemeMode.SYSTEM,
+                                onClick = { onThemeModeChange(ThemeMode.SYSTEM) }
+                            )
+                            GlassChip(
+                                label = stringResource(R.string.settings_theme_light),
+                                selected = themeMode == ThemeMode.LIGHT,
+                                onClick = { onThemeModeChange(ThemeMode.LIGHT) }
+                            )
+                            GlassChip(
+                                label = stringResource(R.string.settings_theme_dark),
+                                selected = themeMode == ThemeMode.DARK,
+                                onClick = { onThemeModeChange(ThemeMode.DARK) }
+                            )
+                        }
+
+                        if (supportsDynamicColor) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            SettingsSwitchRow(
+                                icon = Icons.Default.Palette,
+                                title = stringResource(R.string.settings_dynamic_color),
+                                subtitle = stringResource(R.string.settings_dynamic_color_desc),
+                                checked = dynamicColor,
+                                onCheckedChange = onDynamicColorChange
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Sources & Playback
+            item(key = "sources_playback") {
+                SettingsGroup(title = stringResource(R.string.settings_sources)) {
+                    Column(modifier = Modifier.padding(KanimeSpacing.lg), verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = KanimeSpacing.minTouchTarget)
+                                .clickable(onClick = onOpenPlugins),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.Extension,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(KanimeSpacing.md))
+                                Text(
+                                    text = stringResource(R.string.settings_plugins),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "Video Source Plugins",
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Surface(
-                                    color = if (activePluginCount > 0) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(6.dp)
-                                ) {
-                                    Text(
-                                        text = if (activePluginCount > 0) "$activePluginCount Active" else "Inactive",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (activePluginCount > 0) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
                                 if (pluginUpdateCount > 0) {
-                                    Spacer(modifier = Modifier.width(6.dp))
                                     Surface(
                                         color = MaterialTheme.colorScheme.tertiaryContainer,
-                                        shape = RoundedCornerShape(6.dp)
+                                        shape = PillShape
                                     ) {
                                         Text(
-                                            text = "$pluginUpdateCount Update${if (pluginUpdateCount > 1) "s" else ""}",
+                                            text = stringResource(R.string.plugins_updates_available, pluginUpdateCount),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            fontWeight = FontWeight.Bold
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                         )
                                     }
                                 }
-                            }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "KAnikoto Android library, sources & APK downloads",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = "Open Plugins",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        // Catalog & Metadata Sources (MAL + AniList + TMDB + Kitsu)
-        item {
-            Text(
-                text = "Catalog & Art Sources",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Image, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text("TMDB Primary Art API Key", fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    text = if (tmdbApiKey.isNotBlank()) {
-                                        "Active (Posters, Logos & Episode Stills)"
+                                Surface(
+                                    color = if (activePluginCount > 0) {
+                                        MaterialTheme.colorScheme.primaryContainer
                                     } else {
-                                        "Not set — using Kitsu & AniList fallback"
+                                        MaterialTheme.colorScheme.surfaceContainerHighest
                                     },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    shape = PillShape
+                                ) {
+                                    Text(
+                                        text = if (activePluginCount > 0) {
+                                            stringResource(R.string.settings_plugins_active, activePluginCount)
+                                        } else {
+                                            stringResource(R.string.settings_plugins_inactive)
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (activePluginCount > 0) {
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
-                        FilledTonalButton(
-                            onClick = {
-                                tmdbInput = tmdbApiKey
-                                showTmdbDialog = true
-                            },
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text(if (tmdbApiKey.isNotBlank()) "Edit" else "Set Key")
-                        }
-                    }
 
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Cached, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text("Metadata & Art Cache", fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    text = if (cacheClearedBanner) "Cache cleared" else "Cached MAL, AniList, TMDB & Kitsu responses",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        FilledTonalButton(
-                            onClick = {
-                                viewModel.clearCatalogCache()
-                                cacheClearedBanner = true
-                            },
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Clear")
-                        }
-                    }
-                }
-            }
-        }
-
-        // Appearance
-        item {
-            Text(
-                text = "Appearance & Theme",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.DarkMode, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text("Dark Theme", fontWeight = FontWeight.SemiBold)
-                                Text("Anime dark aesthetic", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        Switch(
-                            checked = uiState.isDarkTheme,
-                            onCheckedChange = { viewModel.toggleTheme() }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Playback
-        item {
-            Text(
-                text = "Playback Preferences",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.VideoLibrary, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text("Auto-Play Next Episode", fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    text = if (autoPlayNext) {
-                                        "Automatically plays the next episode when finished"
-                                    } else {
-                                        "Stops playback at the end of each episode"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Switch(
+                        SettingsSwitchRow(
+                            icon = Icons.Default.PlayCircleOutline,
+                            title = stringResource(R.string.settings_autoplay),
                             checked = autoPlayNext,
-                            onCheckedChange = { viewModel.setAutoPlayNext(it) }
+                            onCheckedChange = onAutoPlayNextChange
                         )
                     }
                 }
             }
-        }
 
-        // Video Enhancement (Anime4K 2x Upscaler & Line Sharpening)
-        item {
-            Text(
-                text = "Video Enhancement (Anime4K)",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+            // Progressive Disclosure: Advanced (Anime4K shaders, TMDB key, Cache)
+            item(key = "advanced") {
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Anime4K 2x CNN Upscaler
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Column(modifier = Modifier.padding(KanimeSpacing.lg)) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = KanimeSpacing.minTouchTarget)
+                                .clickable { showAdvanced = !showAdvanced },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text("Anime4K 2x Upscaler", fontWeight = FontWeight.SemiBold)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(KanimeSpacing.md))
                                 Text(
-                                    text = if (animeUpscaleEnabled) {
-                                        "Active — ${animeUpscaleQuality.label} + Catmull-Rom supersampling"
-                                    } else {
-                                        "Real-time 2x CNN GPU upscaler with anti-ringing"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = stringResource(R.string.settings_advanced),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Switch(
-                            checked = animeUpscaleEnabled,
-                            onCheckedChange = { viewModel.setAnimeUpscaleEnabled(it) }
-                        )
-                    }
-
-                    // Quality preset chips (applies to Upscaler & CNN Restore model)
-                    if (animeUpscaleEnabled || lineSharpeningEnabled) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "CNN Quality Model",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Medium
+                            Icon(
+                                imageVector = if (showAdvanced) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        }
+
+                        AnimatedVisibility(visible = showAdvanced) {
+                            Column(
+                                modifier = Modifier.padding(top = KanimeSpacing.md),
+                                verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
                             ) {
-                                AnimeUpscaleQuality.entries.forEach { preset ->
-                                    FilterChip(
-                                        selected = animeUpscaleQuality == preset,
-                                        onClick = { viewModel.setAnimeUpscaleQuality(preset) },
-                                        label = { Text(preset.label) }
-                                    )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                                SettingsSwitchRow(
+                                    icon = Icons.Default.AutoAwesome,
+                                    title = stringResource(R.string.settings_upscaler),
+                                    checked = animeUpscaleEnabled,
+                                    onCheckedChange = onUpscaleEnabledChange
+                                )
+
+                                if (animeUpscaleEnabled || lineSharpeningEnabled) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
+                                    ) {
+                                        AnimeUpscaleQuality.entries.forEach { preset ->
+                                            GlassChip(
+                                                label = preset.label,
+                                                selected = animeUpscaleQuality == preset,
+                                                onClick = { onUpscaleQualityChange(preset) }
+                                            )
+                                        }
+                                    }
                                 }
-                            }
-                            Text(
-                                text = animeUpscaleQuality.description,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
 
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-
-                    // Anime Line Sharpening (Clamp + Restore CNN + Darken HQ + Thin HQ + Adaptive Line Sharpen)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Brush, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text("Anime Line Sharpening", fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    text = if (lineSharpeningEnabled) {
-                                        "Active — ${animeSharpenStrength.label} edge-aware ink sharpening + HQ restore"
-                                    } else {
-                                        "Restores & sharpens anime ink lines without white halos"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                SettingsSwitchRow(
+                                    icon = Icons.Default.Brush,
+                                    title = stringResource(R.string.settings_sharpening),
+                                    checked = lineSharpeningEnabled,
+                                    onCheckedChange = onLineSharpeningChange
                                 )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Switch(
-                            checked = lineSharpeningEnabled,
-                            onCheckedChange = { viewModel.setAnimeLineSharpening(it) }
-                        )
-                    }
 
-                    if (lineSharpeningEnabled) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "Line Sharpening Intensity",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                AnimeSharpenStrength.entries.forEach { level ->
-                                    FilterChip(
-                                        selected = animeSharpenStrength == level,
-                                        onClick = { viewModel.setAnimeSharpenStrength(level) },
-                                        label = { Text(level.label) }
-                                    )
+                                if (lineSharpeningEnabled) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)
+                                    ) {
+                                        AnimeSharpenStrength.entries.forEach { level ->
+                                            GlassChip(
+                                                label = level.label,
+                                                selected = animeSharpenStrength == level,
+                                                onClick = { onSharpenStrengthChange(level) }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                                // TMDB Key
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = KanimeSpacing.minTouchTarget),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Image,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(KanimeSpacing.md))
+                                        Column {
+                                            Text(
+                                                text = stringResource(R.string.settings_tmdb_key),
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = stringResource(
+                                                    if (tmdbApiKey.isNotBlank()) R.string.settings_tmdb_active else R.string.settings_tmdb_unset
+                                                ),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            tmdbInput = tmdbApiKey
+                                            showTmdbDialog = true
+                                        },
+                                        shape = PillShape
+                                    ) {
+                                        Text(stringResource(if (tmdbApiKey.isNotBlank()) R.string.action_edit else R.string.action_set))
+                                    }
+                                }
+
+                                // Clear Cache
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = KanimeSpacing.minTouchTarget),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Cached,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(KanimeSpacing.md))
+                                        Column {
+                                            Text(
+                                                text = stringResource(R.string.settings_cache),
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (cacheCleared) {
+                                                Text(
+                                                    text = stringResource(R.string.settings_cache_cleared),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        }
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            onClearCache()
+                                            cacheCleared = true
+                                        },
+                                        shape = PillShape
+                                    ) {
+                                        Text(stringResource(R.string.action_clear))
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // About & Data Source Card
-        item {
-            Text(
-                text = "About KAnime",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    SpecRow(icon = Icons.Default.Info, title = "Application", value = "KAnime v1.0.0")
-                    SpecRow(icon = Icons.Default.CloudSync, title = "Metadata Engine", value = "MAL Direct + AniList")
-                    SpecRow(icon = Icons.Default.Image, title = "Art & Stills", value = "TMDB → Kitsu → AniList")
-                    SpecRow(icon = Icons.Default.AutoAwesome, title = "Video Shaders", value = "Anime4K v4 (GLES 3.0)")
+            // Compact About
+            item(key = "about") {
+                SettingsGroup(title = stringResource(R.string.settings_about)) {
+                    Column(
+                        modifier = Modifier.padding(KanimeSpacing.lg),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        AboutRow(stringResource(R.string.settings_version), "1.0.0")
+                        AboutRow(stringResource(R.string.settings_engine), "MAL · AniList · TMDB")
+                        AboutRow(stringResource(R.string.settings_shaders), "Anime4K v4")
+                    }
                 }
             }
         }
@@ -503,18 +544,19 @@ fun SettingsScreen(
     if (showTmdbDialog) {
         AlertDialog(
             onDismissRequest = { showTmdbDialog = false },
-            title = { Text("TMDB API Key") },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text(stringResource(R.string.settings_tmdb_dialog_title)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)) {
                     Text(
-                        text = "Enter a TMDB v3 API key to enable TMDB posters, transparent logos, backdrops, and episode stills as the primary art source. Leave blank to fall back to Kitsu and AniList automatically.",
+                        text = stringResource(R.string.settings_tmdb_dialog_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     OutlinedTextField(
                         value = tmdbInput,
                         onValueChange = { tmdbInput = it },
-                        placeholder = { Text("TMDB v3 API Key") },
+                        placeholder = { Text(stringResource(R.string.settings_tmdb_placeholder)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -522,15 +564,15 @@ fun SettingsScreen(
             },
             confirmButton = {
                 Button(onClick = {
-                    viewModel.saveTmdbApiKey(tmdbInput)
+                    onSaveTmdbKey(tmdbInput)
                     showTmdbDialog = false
                 }) {
-                    Text("Save")
+                    Text(stringResource(R.string.action_save))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showTmdbDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
         )
@@ -538,31 +580,129 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SpecRow(icon: ImageVector, title: String, value: String) {
+private fun SettingsGroup(
+    title: String,
+    content: @Composable () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(KanimeSpacing.sm)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
+        Surface(
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    icon: ImageVector,
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    subtitle: String? = null
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = KanimeSpacing.minTouchTarget),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+        ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(20.dp)
             )
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Spacer(modifier = Modifier.width(KanimeSpacing.md))
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
+        Spacer(modifier = Modifier.width(KanimeSpacing.sm))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
+
+@Composable
+private fun AboutRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface
         )
+    }
+}
+
+@Preview(name = "Settings Light Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.PHONE)
+@Preview(name = "Settings Dark Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, device = Devices.PHONE)
+@Preview(name = "Settings Light Tablet", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.TABLET)
+@Preview(name = "Settings Dark Foldable", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, device = Devices.FOLDABLE)
+@Composable
+private fun SettingsScreenPreview() {
+    KAnimeTheme(animateTransition = false) {
+        KanimeAmbientBackdrop {
+            SettingsScreenContent(
+                themeMode = ThemeMode.SYSTEM,
+                dynamicColor = false,
+                supportsDynamicColor = true,
+                activePluginCount = 1,
+                pluginUpdateCount = 0,
+                autoPlayNext = true,
+                animeUpscaleEnabled = false,
+                animeUpscaleQuality = AnimeUpscaleQuality.AUTO,
+                lineSharpeningEnabled = false,
+                animeSharpenStrength = AnimeSharpenStrength.BALANCED,
+                tmdbApiKey = "",
+                onThemeModeChange = {},
+                onDynamicColorChange = {},
+                onOpenPlugins = {},
+                onAutoPlayNextChange = {},
+                onUpscaleEnabledChange = {},
+                onUpscaleQualityChange = {},
+                onLineSharpeningChange = {},
+                onSharpenStrengthChange = {},
+                onSaveTmdbKey = {},
+                onClearCache = {}
+            )
+        }
     }
 }

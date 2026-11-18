@@ -125,7 +125,14 @@ import com.kanime.app.ui.player.anime.AnimeShaderStatusTracker
 import com.kanime.app.ui.player.anime.AnimeShaders
 import com.kanime.app.ui.player.anime.AnimeSharpenStrength
 import com.kanime.app.ui.player.anime.AnimeUpscaleQuality
+import com.kanime.app.ui.components.GlassSurface
 import com.kanime.app.ui.theme.GeistFontFamily
+import com.kanime.app.ui.theme.KAnimeTheme
+import com.kanime.app.ui.theme.KanimeGlass
+import com.kanime.app.ui.theme.PillShape
+import com.kanime.app.ui.theme.ThemePreferences
+import androidx.compose.ui.tooling.preview.Devices
+import androidx.compose.ui.tooling.preview.Preview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -594,10 +601,18 @@ fun PlayerDialog(
         }
     }
 
+    val dynamicColor by ThemePreferences.dynamicColorFlow.collectAsState()
+
+    KAnimeTheme(
+        darkTheme = true,
+        dynamicColor = dynamicColor,
+        updateSystemBars = false,
+        animateTransition = false
+    ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(MaterialTheme.colorScheme.scrim)
     ) {
         when (val state = resolutionState) {
             is StreamResolutionState.Loading -> {
@@ -609,14 +624,14 @@ fun PlayerDialog(
                     verticalArrangement = Arrangement.Center
                 ) {
                     CircularProgressIndicator(
-                        color = Color(0xFFA5B4FC),
+                        color = MaterialTheme.colorScheme.primary,
                         strokeWidth = 3.dp,
                         modifier = Modifier.size(54.dp)
                     )
                     Spacer(modifier = Modifier.height(20.dp))
                     Text(
                         text = anime.title,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
@@ -627,7 +642,7 @@ fun PlayerDialog(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = formattedEpisodeHeading,
-                        color = Color(0xFFA5B4FC),
+                        color = MaterialTheme.colorScheme.primary,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center,
@@ -638,7 +653,7 @@ fun PlayerDialog(
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
                         text = state.message,
-                        color = Color.White.copy(alpha = 0.72f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
                         maxLines = 2,
@@ -647,12 +662,12 @@ fun PlayerDialog(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Surface(
-                        color = Color(0xFF333C57),
+                        color = MaterialTheme.colorScheme.primaryContainer,
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
                             text = activePluginLabel,
-                            color = Color(0xFFA5B4FC),
+                            color = MaterialTheme.colorScheme.primary,
                             style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             fontWeight = FontWeight.Bold
@@ -678,14 +693,14 @@ fun PlayerDialog(
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         text = "Streaming Unavailable",
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = state.message,
-                        color = Color.White.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(modifier = Modifier.height(24.dp))
@@ -1299,7 +1314,7 @@ fun PlayerDialog(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black)
+                            .background(MaterialTheme.colorScheme.scrim)
                     ) {
                         VideoSurface(modifier = Modifier.fillMaxSize())
                     }
@@ -1310,7 +1325,7 @@ fun PlayerDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color(0xFF0F0F12))
+                            .background(MaterialTheme.colorScheme.background)
                             .statusBarsPadding()
                             .navigationBarsPadding()
                     ) {
@@ -1319,7 +1334,7 @@ fun PlayerDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(16f / 9f)
-                                .background(Color.Black)
+                                .background(MaterialTheme.colorScheme.scrim)
                         ) {
                             VideoSurface(modifier = Modifier.fillMaxSize())
 
@@ -1360,7 +1375,7 @@ fun PlayerDialog(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .background(Color.Black.copy(alpha = 0.45f))
+                                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f))
                                 ) {
                                     // Top Bar in Portrait: Back arrow, Server icon, 1080p (Image 1)
                                     Row(
@@ -1375,7 +1390,7 @@ fun PlayerDialog(
                                             Icon(
                                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                                 contentDescription = "Back",
-                                                tint = Color.White,
+                                                tint = MaterialTheme.colorScheme.onSurface,
                                                 modifier = Modifier.size(24.dp)
                                             )
                                         }
@@ -1388,13 +1403,13 @@ fun PlayerDialog(
                                                 Icon(
                                                     imageVector = Icons.Default.FolderOpen,
                                                     contentDescription = "Streams",
-                                                    tint = Color.White,
+                                                    tint = MaterialTheme.colorScheme.onSurface,
                                                     modifier = Modifier.size(22.dp)
                                                 )
                                             }
                                             Text(
                                                 text = qualityBadgeText,
-                                                color = if (isVideoEnhanced) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.85f),
+                                                color = if (isVideoEnhanced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 modifier = Modifier
@@ -1416,7 +1431,7 @@ fun PlayerDialog(
                                         Icon(
                                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                             contentDescription = if (isPlaying) "Pause" else "Play",
-                                            tint = Color.White,
+                                            tint = MaterialTheme.colorScheme.onSurface,
                                             modifier = Modifier.size(46.dp)
                                         )
                                     }
@@ -1435,7 +1450,7 @@ fun PlayerDialog(
                                         ) {
                                             Text(
                                                 text = "${formatTime(currentPositionMs)} / ${formatTime(durationMs)}",
-                                                color = Color.White,
+                                                color = MaterialTheme.colorScheme.onSurface,
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Medium
                                             )
@@ -1448,7 +1463,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         Icons.Default.PictureInPicture,
                                                         contentDescription = "PiP",
-                                                        tint = Color.White,
+                                                        tint = MaterialTheme.colorScheme.onSurface,
                                                         modifier = Modifier.size(20.dp)
                                                     )
                                                 }
@@ -1462,7 +1477,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         Icons.Default.Fullscreen,
                                                         contentDescription = "Fullscreen",
-                                                        tint = Color.White,
+                                                        tint = MaterialTheme.colorScheme.onSurface,
                                                         modifier = Modifier.size(22.dp)
                                                     )
                                                 }
@@ -1479,9 +1494,9 @@ fun PlayerDialog(
                                                 .fillMaxWidth()
                                                 .height(20.dp),
                                             colors = SliderDefaults.colors(
-                                                thumbColor = Color(0xFFA5B4FC),
-                                                activeTrackColor = Color(0xFFA5B4FC),
-                                                inactiveTrackColor = Color.White.copy(alpha = 0.25f)
+                                                thumbColor = MaterialTheme.colorScheme.primary,
+                                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
                                             )
                                         )
                                     }
@@ -1519,7 +1534,7 @@ fun PlayerDialog(
                                 text = formattedEpisodeHeading,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1528,7 +1543,7 @@ fun PlayerDialog(
                                 text = anime.title,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color.White.copy(alpha = 0.65f),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1625,7 +1640,7 @@ fun PlayerDialog(
                             }
 
                             Spacer(modifier = Modifier.height(14.dp))
-                            HorizontalDivider(color = Color.White.copy(alpha = 0.12f), thickness = 0.8.dp)
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f), thickness = 0.8.dp)
                             Spacer(modifier = Modifier.height(10.dp))
 
                             // "Show comments >" Strip (Image 1)
@@ -1642,13 +1657,13 @@ fun PlayerDialog(
                                     Icon(
                                         imageVector = Icons.Default.ChatBubbleOutline,
                                         contentDescription = null,
-                                        tint = Color.White.copy(alpha = 0.7f),
+                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text(
                                         text = "Show comments",
-                                        color = Color.White.copy(alpha = 0.85f),
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Medium
                                     )
@@ -1656,13 +1671,13 @@ fun PlayerDialog(
                                 Icon(
                                     imageVector = Icons.Default.KeyboardArrowRight,
                                     contentDescription = null,
-                                    tint = Color.White.copy(alpha = 0.5f),
+                                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
 
                             Spacer(modifier = Modifier.height(10.dp))
-                            HorizontalDivider(color = Color.White.copy(alpha = 0.12f), thickness = 0.8.dp)
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f), thickness = 0.8.dp)
                             Spacer(modifier = Modifier.height(12.dp))
 
                             // Episodes Section Header (Image 1: "25 Episodes" + action icons)
@@ -1676,7 +1691,7 @@ fun PlayerDialog(
                                     text = "${anime.episodeList.size} Episodes",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
 
                                 Row(
@@ -1689,7 +1704,7 @@ fun PlayerDialog(
                                         Icon(
                                             imageVector = Icons.Default.AutoAwesome,
                                             contentDescription = "Smart Skip",
-                                            tint = Color(0xFFA5B4FC),
+                                            tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
@@ -1698,7 +1713,7 @@ fun PlayerDialog(
                                         Icon(
                                             imageVector = Icons.Default.Sort,
                                             contentDescription = "Sort",
-                                            tint = Color.White.copy(alpha = 0.8f),
+                                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
@@ -1716,9 +1731,9 @@ fun PlayerDialog(
                                             onSelectEpisode?.invoke(ep)
                                         }
                                     },
-                                    color = if (isCurrent) Color(0xFF28283E) else Color(0xFF18181E),
+                                    color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                                     shape = RoundedCornerShape(12.dp),
-                                    border = if (isCurrent) BorderStroke(1.5.dp, Color(0xFFA5B4FC)) else null,
+                                    border = if (isCurrent) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(vertical = 4.dp)
@@ -1731,7 +1746,7 @@ fun PlayerDialog(
                                             modifier = Modifier
                                                 .size(width = 80.dp, height = 48.dp)
                                                 .clip(RoundedCornerShape(8.dp))
-                                                .background(Color(0xFF282830))
+                                                .background(MaterialTheme.colorScheme.surfaceContainer)
                                         ) {
                                             AsyncImage(
                                                 model = ep.thumbnail.ifBlank { anime.coverUrl },
@@ -1743,13 +1758,13 @@ fun PlayerDialog(
                                                 Box(
                                                     modifier = Modifier
                                                         .fillMaxSize()
-                                                        .background(Color.Black.copy(alpha = 0.45f)),
+                                                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f)),
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Default.PlayArrow,
                                                         contentDescription = null,
-                                                        tint = Color(0xFFA5B4FC),
+                                                        tint = MaterialTheme.colorScheme.primary,
                                                         modifier = Modifier.size(24.dp)
                                                     )
                                                 }
@@ -1761,13 +1776,13 @@ fun PlayerDialog(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 text = "Episode ${ep.episodeNumber}",
-                                                color = if (isCurrent) Color(0xFFA5B4FC) else Color.White,
+                                                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.Bold
                                             )
                                             Text(
                                                 text = ep.title,
-                                                color = Color.White.copy(alpha = 0.65f),
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
@@ -1785,7 +1800,7 @@ fun PlayerDialog(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black)
+                            .background(MaterialTheme.colorScheme.scrim)
                     ) {
                         VideoSurface(modifier = Modifier.fillMaxSize())
 
@@ -1866,43 +1881,42 @@ fun PlayerDialog(
                                 .align(if (gestureType == "brightness") Alignment.CenterStart else Alignment.CenterEnd)
                                 .padding(horizontal = 40.dp)
                         ) {
-                            Surface(
-                                color = Color.Black.copy(alpha = 0.75f),
-                                shape = RoundedCornerShape(24.dp),
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f))
+                            GlassSurface(
+                                shape = MaterialTheme.shapes.large,
+                                overMedia = true
                             ) {
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier.padding(vertical = 14.dp, horizontal = 12.dp)
+                                    modifier = Modifier.padding(vertical = 14.dp, horizontal = 14.dp)
                                 ) {
                                     Icon(
                                         imageVector = if (gestureType == "brightness") Icons.Default.BrightnessMedium else Icons.Default.VolumeUp,
                                         contentDescription = null,
-                                        tint = Color(0xFFA5B4FC),
-                                        modifier = Modifier.size(24.dp)
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(22.dp)
                                     )
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Box(
                                         modifier = Modifier
                                             .width(6.dp)
                                             .height(110.dp)
-                                            .clip(RoundedCornerShape(3.dp))
-                                            .background(Color.White.copy(alpha = 0.25f)),
+                                            .clip(PillShape)
+                                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)),
                                         contentAlignment = Alignment.BottomCenter
                                     ) {
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .fillMaxHeight(gestureLevel.coerceIn(0f, 1f))
-                                                .background(Color(0xFFA5B4FC))
+                                                .background(MaterialTheme.colorScheme.primary)
                                         )
                                     }
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(
                                         text = "${(gestureLevel * 100).toInt()}%",
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold
                                     )
                                 }
                             }
@@ -1920,7 +1934,7 @@ fun PlayerDialog(
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = if (isControlsLocked) 0.05f else 0.40f))
+                                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = if (isControlsLocked) 0.05f else 0.40f))
                             ) {
                                 if (isControlsLocked) {
                                     IconButton(
@@ -1929,9 +1943,9 @@ fun PlayerDialog(
                                             .align(Alignment.TopEnd)
                                             .padding(top = 20.dp, end = 36.dp)
                                             .size(48.dp)
-                                            .background(Color.Black.copy(alpha = 0.65f), CircleShape)
+                                            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.65f), CircleShape)
                                     ) {
-                                        Icon(Icons.Default.Lock, contentDescription = "Unlock", tint = Color.White)
+                                        Icon(Icons.Default.Lock, contentDescription = "Unlock", tint = MaterialTheme.colorScheme.onSurface)
                                     }
                                 } else {
                                     // ── Top Bar (Image 4) ──────────────────────────────────
@@ -1952,7 +1966,7 @@ fun PlayerDialog(
                                             Icon(
                                                 imageVector = Icons.Default.KeyboardArrowDown,
                                                 contentDescription = "Collapse",
-                                                tint = Color.White,
+                                                tint = MaterialTheme.colorScheme.onSurface,
                                                 modifier = Modifier.size(36.dp)
                                             )
                                         }
@@ -1963,7 +1977,7 @@ fun PlayerDialog(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 text = formattedEpisodeHeading,
-                                                color = Color.White,
+                                                color = MaterialTheme.colorScheme.onSurface,
                                                 style = MaterialTheme.typography.titleMedium,
                                                 fontWeight = FontWeight.Bold,
                                                 maxLines = 1,
@@ -1971,7 +1985,7 @@ fun PlayerDialog(
                                             )
                                             Text(
                                                 text = anime.title,
-                                                color = Color.White.copy(alpha = 0.7f),
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.SemiBold,
                                                 maxLines = 1,
@@ -1992,7 +2006,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         Icons.Default.AutoAwesome,
                                                         contentDescription = "Anime4K Upscaler",
-                                                        tint = if (isVideoEnhanced) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.65f),
+                                                        tint = if (isVideoEnhanced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                                                         modifier = Modifier.size(22.dp)
                                                     )
                                                 }
@@ -2008,7 +2022,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         Icons.AutoMirrored.Filled.PlaylistPlay,
                                                         contentDescription = "Auto-Play Next",
-                                                        tint = if (autoPlayNext) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.45f),
+                                                        tint = if (autoPlayNext) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                                                         modifier = Modifier.size(24.dp)
                                                     )
                                                 }
@@ -2020,7 +2034,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         Icons.Default.PictureInPictureAlt,
                                                         contentDescription = "PiP",
-                                                        tint = Color.White,
+                                                        tint = MaterialTheme.colorScheme.onSurface,
                                                         modifier = Modifier.size(22.dp)
                                                     )
                                                 }
@@ -2032,7 +2046,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         Icons.Default.Speed,
                                                         contentDescription = "Speed",
-                                                        tint = Color.White,
+                                                        tint = MaterialTheme.colorScheme.onSurface,
                                                         modifier = Modifier.size(22.dp)
                                                     )
                                                 }
@@ -2044,7 +2058,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         Icons.Default.LockOpen,
                                                         contentDescription = "Lock",
-                                                        tint = Color.White,
+                                                        tint = MaterialTheme.colorScheme.onSurface,
                                                         modifier = Modifier.size(22.dp)
                                                     )
                                                 }
@@ -2052,7 +2066,7 @@ fun PlayerDialog(
 
                                             Text(
                                                 text = qualityBadgeText,
-                                                color = if (isVideoEnhanced) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.85f),
+                                                color = if (isVideoEnhanced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 modifier = Modifier
@@ -2076,23 +2090,25 @@ fun PlayerDialog(
                                             Icon(
                                                 Icons.Default.SkipPrevious,
                                                 contentDescription = "Previous Episode",
-                                                tint = if (onPreviousEpisode != null) Color.White else Color.White.copy(alpha = 0.3f),
+                                                tint = if (onPreviousEpisode != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
                                                 modifier = Modifier.size(40.dp)
                                             )
                                         }
 
-                                        // Clean White Play/Pause (|| / ▶) - matching Image 4
-                                        IconButton(
+                                        // Liquid Glass Play/Pause Pill
+                                        GlassSurface(
                                             onClick = {
                                                 if (isPlaying) pausePlayback() else resumeOrPlay()
                                             },
+                                            shape = CircleShape,
+                                            overMedia = true,
                                             modifier = Modifier.size(72.dp)
                                         ) {
                                             Icon(
                                                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                                 contentDescription = if (isPlaying) "Pause" else "Play",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(56.dp)
+                                                tint = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.size(40.dp)
                                             )
                                         }
 
@@ -2104,7 +2120,7 @@ fun PlayerDialog(
                                             Icon(
                                                 Icons.Default.SkipNext,
                                                 contentDescription = "Next Episode",
-                                                tint = if (onNextEpisode != null) Color.White else Color.White.copy(alpha = 0.3f),
+                                                tint = if (onNextEpisode != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
                                                 modifier = Modifier.size(40.dp)
                                             )
                                         }
@@ -2125,36 +2141,36 @@ fun PlayerDialog(
                                         ) {
                                             Text(
                                                 text = "${formatTime(currentPositionMs)} / ${formatTime(durationMs)}",
-                                                color = Color.White,
+                                                color = MaterialTheme.colorScheme.onSurface,
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Medium
                                             )
 
-                                            // Outlined +10s pill button (Image 4)
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(20.dp))
-                                                    .border(1.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
-                                                    .background(Color.Black.copy(alpha = 0.25f))
-                                                    .clickable {
-                                                        val nextPos = (exoPlayer.currentPosition + 10000).coerceAtMost(exoPlayer.duration)
-                                                        exoPlayer.seekTo(nextPos)
-                                                    }
-                                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                                            // Liquid glass +10s pill button
+                                            GlassSurface(
+                                                onClick = {
+                                                    val nextPos = (exoPlayer.currentPosition + 10000).coerceAtMost(exoPlayer.duration)
+                                                    exoPlayer.seekTo(nextPos)
+                                                },
+                                                shape = PillShape,
+                                                overMedia = true
                                             ) {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
                                                     Icon(
                                                         Icons.Default.FastForward,
                                                         contentDescription = "+10s",
-                                                        tint = Color.White,
+                                                        tint = MaterialTheme.colorScheme.primary,
                                                         modifier = Modifier.size(16.dp)
                                                     )
                                                     Spacer(modifier = Modifier.width(4.dp))
                                                     Text(
                                                         text = "+10s",
-                                                        color = Color.White,
-                                                        fontSize = 12.sp,
-                                                        fontWeight = FontWeight.Bold
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        fontWeight = FontWeight.SemiBold
                                                     )
                                                 }
                                             }
@@ -2171,9 +2187,9 @@ fun PlayerDialog(
                                             },
                                             modifier = Modifier.fillMaxWidth().height(26.dp),
                                             colors = SliderDefaults.colors(
-                                                thumbColor = Color(0xFFA5B4FC),
-                                                activeTrackColor = Color(0xFFA5B4FC),
-                                                inactiveTrackColor = Color.White.copy(alpha = 0.25f)
+                                                thumbColor = MaterialTheme.colorScheme.primary,
+                                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
                                             )
                                         )
 
@@ -2196,7 +2212,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         Icons.Default.Tune,
                                                         contentDescription = "Player Settings",
-                                                        tint = Color.White,
+                                                        tint = MaterialTheme.colorScheme.onSurface,
                                                         modifier = Modifier.size(22.dp)
                                                     )
                                                 }
@@ -2209,7 +2225,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         Icons.Default.FolderOpen,
                                                         contentDescription = "Streams",
-                                                        tint = Color.White,
+                                                        tint = MaterialTheme.colorScheme.onSurface,
                                                         modifier = Modifier.size(22.dp)
                                                     )
                                                 }
@@ -2218,7 +2234,7 @@ fun PlayerDialog(
                                                 Box(
                                                     modifier = Modifier
                                                         .clip(RoundedCornerShape(8.dp))
-                                                        .background(if (subtitlesEnabled) Color(0xFFA5B4FC).copy(alpha = 0.25f) else Color.Transparent)
+                                                        .background(if (subtitlesEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.Transparent)
                                                 ) {
                                                     IconButton(
                                                         onClick = { showSubtitlesSheet = true },
@@ -2227,7 +2243,7 @@ fun PlayerDialog(
                                                         Icon(
                                                             Icons.Default.Subtitles,
                                                             contentDescription = "Subtitles",
-                                                            tint = if (subtitlesEnabled) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.6f),
+                                                            tint = if (subtitlesEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                                             modifier = Modifier.size(22.dp)
                                                         )
                                                     }
@@ -2237,7 +2253,7 @@ fun PlayerDialog(
                                                 Box(
                                                     modifier = Modifier
                                                         .clip(RoundedCornerShape(8.dp))
-                                                        .background(if (showAudioSheet) Color(0xFFA5B4FC).copy(alpha = 0.25f) else Color.Transparent)
+                                                        .background(if (showAudioSheet) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.Transparent)
                                                 ) {
                                                     IconButton(
                                                         onClick = { showAudioSheet = true },
@@ -2246,7 +2262,7 @@ fun PlayerDialog(
                                                         Icon(
                                                             Icons.Default.MusicNote,
                                                             contentDescription = "Audio Track ($activeAudioShortLabel)",
-                                                            tint = if (showAudioSheet) Color(0xFFA5B4FC) else Color.White,
+                                                            tint = if (showAudioSheet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                                             modifier = Modifier.size(22.dp)
                                                         )
                                                     }
@@ -2266,7 +2282,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         Icons.Default.PictureInPicture,
                                                         contentDescription = "Picture-in-Picture",
-                                                        tint = Color.White,
+                                                        tint = MaterialTheme.colorScheme.onSurface,
                                                         modifier = Modifier.size(22.dp)
                                                     )
                                                 }
@@ -2279,7 +2295,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         Icons.Default.AspectRatio,
                                                         contentDescription = "Aspect Ratio",
-                                                        tint = if (pictureMode != VideoPictureMode.FIT || videoZoom > 1.01f) Color(0xFFA5B4FC) else Color.White,
+                                                        tint = if (pictureMode != VideoPictureMode.FIT || videoZoom > 1.01f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                                         modifier = Modifier.size(22.dp)
                                                     )
                                                 }
@@ -2294,7 +2310,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         imageVector = Icons.Default.FullscreenExit,
                                                         contentDescription = "Exit Fullscreen",
-                                                        tint = Color.White,
+                                                        tint = MaterialTheme.colorScheme.onSurface,
                                                         modifier = Modifier.size(24.dp)
                                                     )
                                                 }
@@ -2337,27 +2353,25 @@ fun PlayerDialog(
                 .align(Alignment.TopCenter)
                 .padding(top = 70.dp)
         ) {
-            Surface(
-                color = Color.Black.copy(alpha = 0.85f),
-                shape = RoundedCornerShape(20.dp),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f))
+            GlassSurface(
+                shape = PillShape,
+                overMedia = true
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp)
                 ) {
                     Icon(
                         Icons.Default.AspectRatio,
                         contentDescription = null,
-                        tint = Color(0xFFA5B4FC),
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = aspectRatioToastMessage ?: "",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.labelLarge
                     )
                 }
             }
@@ -2371,7 +2385,7 @@ fun PlayerDialog(
                 modifier = Modifier
                     .fillMaxSize()
                     .zIndex(15f)
-                    .background(Color.Black.copy(alpha = 0.65f))
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.65f))
                     .clickable {
                         showStreamsSheet = false
                         showSourceSheet = false
@@ -2400,7 +2414,7 @@ fun PlayerDialog(
                     .widthIn(max = 680.dp)
                     .fillMaxWidth()
                     .fillMaxHeight(if (isLandscape) 0.88f else 0.65f),
-                color = Color(0xFF1E1E24),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 shadowElevation = 16.dp
             ) {
@@ -2414,12 +2428,12 @@ fun PlayerDialog(
                             .align(Alignment.CenterHorizontally)
                             .padding(vertical = 8.dp)
                             .size(width = 44.dp, height = 4.dp)
-                            .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
                     )
 
                     Text(
                         text = "Streams",
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
                     )
@@ -2435,13 +2449,13 @@ fun PlayerDialog(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Auto select stream",
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
                                 text = "Pick the stream most like your last choice for this title",
-                                color = Color.White.copy(alpha = 0.6f),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
@@ -2449,8 +2463,8 @@ fun PlayerDialog(
                             checked = autoSelectStream,
                             onCheckedChange = { autoSelectStream = it },
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFFA5B4FC)
+                                checkedThumbColor = MaterialTheme.colorScheme.onSurface,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary
                             )
                         )
                     }
@@ -2485,14 +2499,14 @@ fun PlayerDialog(
                                 ) {
                                     Text(
                                         text = "$serverName  ${srvList.size} streams",
-                                        color = Color.White.copy(alpha = 0.7f),
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     Icon(
                                         Icons.Default.KeyboardArrowUp,
                                         contentDescription = null,
-                                        tint = Color.White.copy(alpha = 0.6f),
+                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -2512,7 +2526,7 @@ fun PlayerDialog(
                                         resolveStream(srv)
                                     },
                                     shape = RoundedCornerShape(12.dp),
-                                    color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -2524,13 +2538,13 @@ fun PlayerDialog(
                                             Icon(
                                                 Icons.Default.PlayCircle,
                                                 contentDescription = null,
-                                                tint = if (isSelected) Color(0xFFA5B4FC) else Color.White,
+                                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                                 modifier = Modifier.size(22.dp)
                                             )
                                             Spacer(modifier = Modifier.width(12.dp))
                                             Text(
                                                 text = "${srv.name} - ${srv.type.replaceFirstChar { it.uppercase() }} - 1080p",
-                                                color = Color.White,
+                                                color = MaterialTheme.colorScheme.onSurface,
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                             )
@@ -2540,7 +2554,7 @@ fun PlayerDialog(
                                             Icon(
                                                 Icons.Default.CheckCircle,
                                                 contentDescription = "Selected",
-                                                tint = Color(0xFFA5B4FC),
+                                                tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(22.dp)
                                             )
                                         }
@@ -2569,7 +2583,7 @@ fun PlayerDialog(
                     .widthIn(max = 680.dp)
                     .fillMaxWidth()
                     .fillMaxHeight(if (isLandscape) 0.88f else 0.72f),
-                color = Color(0xFF1E1E24),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 shadowElevation = 16.dp
             ) {
@@ -2583,7 +2597,7 @@ fun PlayerDialog(
                             .align(Alignment.CenterHorizontally)
                             .padding(vertical = 8.dp)
                             .size(width = 44.dp, height = 4.dp)
-                            .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
                     )
 
                     Row(
@@ -2598,12 +2612,12 @@ fun PlayerDialog(
                             Icon(
                                 imageVector = Icons.Default.Subtitles,
                                 contentDescription = null,
-                                tint = Color(0xFFA5B4FC),
+                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(22.dp)
                             )
                             Text(
                                 text = "Subtitles & Captions",
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold
                             )
@@ -2619,7 +2633,7 @@ fun PlayerDialog(
                             ) {
                                 Text(
                                     text = "Reset",
-                                    color = Color(0xFFA5B4FC),
+                                    color = MaterialTheme.colorScheme.primary,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -2633,7 +2647,7 @@ fun PlayerDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF282830), RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(12.dp))
                             .padding(4.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -2641,7 +2655,7 @@ fun PlayerDialog(
                             val selected = subtitleSheetTab == idx
                             Surface(
                                 onClick = { subtitleSheetTab = idx },
-                                color = if (selected) Color(0xFF333C57) else Color.Transparent,
+                                color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
                                 shape = RoundedCornerShape(9.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
@@ -2651,7 +2665,7 @@ fun PlayerDialog(
                                 ) {
                                     Text(
                                         text = tabLabel,
-                                        color = if (selected) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.72f),
+                                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                                     )
@@ -2672,13 +2686,13 @@ fun PlayerDialog(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "Enable Subtitles",
-                                    color = Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
                                     text = if (subtitlesEnabled) "Captions are currently visible" else "Captions are turned off",
-                                    color = Color.White.copy(alpha = 0.6f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                     style = MaterialTheme.typography.bodySmall
                                 )
                             }
@@ -2686,8 +2700,8 @@ fun PlayerDialog(
                                 checked = subtitlesEnabled,
                                 onCheckedChange = { subtitlesEnabled = it },
                                 colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = Color(0xFFA5B4FC)
+                                    checkedThumbColor = MaterialTheme.colorScheme.onSurface,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary
                                 )
                             )
                         }
@@ -2730,8 +2744,8 @@ fun PlayerDialog(
                                         showSubtitlesSheet = false
                                     },
                                     shape = RoundedCornerShape(12.dp),
-                                    color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
-                                    border = if (isSelected) BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.65f)) else null,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                    border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)) else null,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -2743,13 +2757,13 @@ fun PlayerDialog(
                                             Icon(
                                                 Icons.Default.Subtitles,
                                                 contentDescription = null,
-                                                tint = if (isSelected) Color(0xFFA5B4FC) else Color.White,
+                                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                             Spacer(modifier = Modifier.width(12.dp))
                                             Text(
                                                 text = opt,
-                                                color = Color.White,
+                                                color = MaterialTheme.colorScheme.onSurface,
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                             )
@@ -2759,7 +2773,7 @@ fun PlayerDialog(
                                             Icon(
                                                 Icons.Default.CheckCircle,
                                                 contentDescription = "Selected",
-                                                tint = Color(0xFFA5B4FC),
+                                                tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(22.dp)
                                             )
                                         }
@@ -2777,9 +2791,9 @@ fun PlayerDialog(
                             CaptionFont.CASUAL -> FontFamily.Cursive
                         }
                         val previewShadow = when (captionStyle.edgeStyle) {
-                            CaptionEdgeStyle.OUTLINE -> Shadow(color = Color.Black, offset = Offset(0f, 0f), blurRadius = 6f)
-                            CaptionEdgeStyle.DROP_SHADOW -> Shadow(color = Color.Black, offset = Offset(3f, 3f), blurRadius = 5f)
-                            CaptionEdgeStyle.RAISED -> Shadow(color = Color.Black, offset = Offset(0f, 3f), blurRadius = 3f)
+                            CaptionEdgeStyle.OUTLINE -> Shadow(color = MaterialTheme.colorScheme.scrim, offset = Offset(0f, 0f), blurRadius = 6f)
+                            CaptionEdgeStyle.DROP_SHADOW -> Shadow(color = MaterialTheme.colorScheme.scrim, offset = Offset(3f, 3f), blurRadius = 5f)
+                            CaptionEdgeStyle.RAISED -> Shadow(color = MaterialTheme.colorScheme.scrim, offset = Offset(0f, 3f), blurRadius = 3f)
                             CaptionEdgeStyle.NONE -> Shadow.None
                         }
 
@@ -2798,10 +2812,10 @@ fun PlayerDialog(
                                     .clip(RoundedCornerShape(14.dp))
                                     .background(
                                         Brush.linearGradient(
-                                            listOf(Color(0xFF15192B), Color(0xFF232842), Color(0xFF121521))
+                                            listOf(MaterialTheme.colorScheme.surfaceContainerLowest, MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.background)
                                         )
                                     )
-                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                                    .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                                 contentAlignment = when (captionStyle.position) {
                                     CaptionPosition.LOW -> Alignment.BottomCenter
@@ -2832,7 +2846,7 @@ fun PlayerDialog(
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
                                     text = "Font Family",
-                                    color = Color.White.copy(alpha = 0.78f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -2849,10 +2863,10 @@ fun PlayerDialog(
                                             onClick = { CatalogConfig.updateCaptionStyle { it.copy(font = font) } },
                                             label = { Text(font.label) },
                                             colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = Color(0xFF333C57),
-                                                selectedLabelColor = Color(0xFFA5B4FC),
-                                                containerColor = Color(0xFF282830),
-                                                labelColor = Color.White
+                                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                                labelColor = MaterialTheme.colorScheme.onSurface
                                             ),
                                             shape = RoundedCornerShape(10.dp)
                                         )
@@ -2868,7 +2882,7 @@ fun PlayerDialog(
                             ) {
                                 Text(
                                     text = "Bold Captions",
-                                    color = Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -2876,8 +2890,8 @@ fun PlayerDialog(
                                     checked = captionStyle.isBold,
                                     onCheckedChange = { bold -> CatalogConfig.updateCaptionStyle { it.copy(isBold = bold) } },
                                     colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = Color(0xFFA5B4FC)
+                                        checkedThumbColor = MaterialTheme.colorScheme.onSurface,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primary
                                     )
                                 )
                             }
@@ -2886,7 +2900,7 @@ fun PlayerDialog(
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
                                     text = "Text Size",
-                                    color = Color.White.copy(alpha = 0.78f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -2901,10 +2915,10 @@ fun PlayerDialog(
                                             onClick = { CatalogConfig.updateCaptionStyle { it.copy(textSize = size) } },
                                             label = { Text(size.label) },
                                             colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = Color(0xFF333C57),
-                                                selectedLabelColor = Color(0xFFA5B4FC),
-                                                containerColor = Color(0xFF282830),
-                                                labelColor = Color.White
+                                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                                labelColor = MaterialTheme.colorScheme.onSurface
                                             ),
                                             shape = RoundedCornerShape(10.dp),
                                             modifier = Modifier.weight(1f)
@@ -2917,7 +2931,7 @@ fun PlayerDialog(
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
                                     text = "Text Color",
-                                    color = Color.White.copy(alpha = 0.78f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -2942,7 +2956,7 @@ fun PlayerDialog(
                                                     .background(Color(col.argb))
                                                     .border(
                                                         width = if (isSelected) 2.5.dp else 1.dp,
-                                                        color = if (isSelected) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.3f),
+                                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
                                                         shape = CircleShape
                                                     ),
                                                 contentAlignment = Alignment.Center
@@ -2951,14 +2965,14 @@ fun PlayerDialog(
                                                     Icon(
                                                         imageVector = Icons.Default.Check,
                                                         contentDescription = col.label,
-                                                        tint = Color.Black,
+                                                        tint = MaterialTheme.colorScheme.scrim,
                                                         modifier = Modifier.size(18.dp)
                                                     )
                                                 }
                                             }
                                             Text(
                                                 text = col.label,
-                                                color = if (isSelected) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.65f),
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                                                 style = MaterialTheme.typography.labelSmall
                                             )
                                         }
@@ -2970,7 +2984,7 @@ fun PlayerDialog(
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
                                     text = "Edge Style",
-                                    color = Color.White.copy(alpha = 0.78f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -2987,10 +3001,10 @@ fun PlayerDialog(
                                             onClick = { CatalogConfig.updateCaptionStyle { it.copy(edgeStyle = edge) } },
                                             label = { Text(edge.label) },
                                             colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = Color(0xFF333C57),
-                                                selectedLabelColor = Color(0xFFA5B4FC),
-                                                containerColor = Color(0xFF282830),
-                                                labelColor = Color.White
+                                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                                labelColor = MaterialTheme.colorScheme.onSurface
                                             ),
                                             shape = RoundedCornerShape(10.dp)
                                         )
@@ -3002,7 +3016,7 @@ fun PlayerDialog(
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
                                     text = "Background",
-                                    color = Color.White.copy(alpha = 0.78f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -3017,10 +3031,10 @@ fun PlayerDialog(
                                             onClick = { CatalogConfig.updateCaptionStyle { it.copy(background = bg) } },
                                             label = { Text(bg.label) },
                                             colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = Color(0xFF333C57),
-                                                selectedLabelColor = Color(0xFFA5B4FC),
-                                                containerColor = Color(0xFF282830),
-                                                labelColor = Color.White
+                                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                                labelColor = MaterialTheme.colorScheme.onSurface
                                             ),
                                             shape = RoundedCornerShape(10.dp),
                                             modifier = Modifier.weight(1f)
@@ -3033,7 +3047,7 @@ fun PlayerDialog(
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
                                     text = "Vertical Position",
-                                    color = Color.White.copy(alpha = 0.78f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -3048,10 +3062,10 @@ fun PlayerDialog(
                                             onClick = { CatalogConfig.updateCaptionStyle { it.copy(position = pos) } },
                                             label = { Text(pos.label) },
                                             colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = Color(0xFF333C57),
-                                                selectedLabelColor = Color(0xFFA5B4FC),
-                                                containerColor = Color(0xFF282830),
-                                                labelColor = Color.White
+                                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                                labelColor = MaterialTheme.colorScheme.onSurface
                                             ),
                                             shape = RoundedCornerShape(10.dp),
                                             modifier = Modifier.weight(1f)
@@ -3107,7 +3121,7 @@ fun PlayerDialog(
                     .widthIn(max = 680.dp)
                     .fillMaxWidth()
                     .fillMaxHeight(if (isLandscape) 0.82f else 0.56f),
-                color = Color(0xFF1E1E24),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 shadowElevation = 16.dp
             ) {
@@ -3121,7 +3135,7 @@ fun PlayerDialog(
                             .align(Alignment.CenterHorizontally)
                             .padding(vertical = 8.dp)
                             .size(width = 44.dp, height = 4.dp)
-                            .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
                     )
 
                     Row(
@@ -3131,12 +3145,12 @@ fun PlayerDialog(
                         Icon(
                             imageVector = Icons.Default.Headphones,
                             contentDescription = null,
-                            tint = Color(0xFFA5B4FC),
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(22.dp)
                         )
                         Text(
                             text = "Audio",
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
@@ -3145,7 +3159,7 @@ fun PlayerDialog(
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = "Choose an available audio language for this episode",
-                        color = Color.White.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         style = MaterialTheme.typography.bodySmall
                     )
 
@@ -3162,7 +3176,7 @@ fun PlayerDialog(
                             item(key = "embedded_audio_header") {
                                 Text(
                                     text = "IN-STREAM AUDIO TRACKS",
-                                    color = Color(0xFFA5B4FC),
+                                    color = MaterialTheme.colorScheme.primary,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(top = 2.dp, bottom = 2.dp)
@@ -3179,8 +3193,8 @@ fun PlayerDialog(
                                         showAudioSheet = false
                                     },
                                     shape = RoundedCornerShape(12.dp),
-                                    color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
-                                    border = if (isSelected) BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.65f)) else null,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                    border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)) else null,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -3195,21 +3209,21 @@ fun PlayerDialog(
                                             Icon(
                                                 imageVector = Icons.Default.GraphicEq,
                                                 contentDescription = null,
-                                                tint = if (isSelected) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.8f),
+                                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                                                 modifier = Modifier.size(20.dp)
                                             )
                                             Spacer(modifier = Modifier.width(12.dp))
                                             Column {
                                                 Text(
                                                     text = track.displayName,
-                                                    color = Color.White,
+                                                    color = MaterialTheme.colorScheme.onSurface,
                                                     style = MaterialTheme.typography.bodyMedium,
                                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                                 )
                                                 if (track.detail.isNotBlank()) {
                                                     Text(
                                                         text = track.detail,
-                                                        color = Color.White.copy(alpha = 0.6f),
+                                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                                         style = MaterialTheme.typography.labelSmall
                                                     )
                                                 }
@@ -3219,7 +3233,7 @@ fun PlayerDialog(
                                             Icon(
                                                 imageVector = Icons.Default.CheckCircle,
                                                 contentDescription = "Selected",
-                                                tint = Color(0xFFA5B4FC),
+                                                tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(22.dp)
                                             )
                                         }
@@ -3232,7 +3246,7 @@ fun PlayerDialog(
                         item(key = "source_audio_header") {
                             Text(
                                 text = if (embeddedAudioTracks.size > 1) "SOURCE AUDIO STREAMS" else "AVAILABLE AUDIO",
-                                color = Color(0xFFA5B4FC),
+                                color = MaterialTheme.colorScheme.primary,
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(top = if (embeddedAudioTracks.size > 1) 8.dp else 2.dp, bottom = 2.dp)
@@ -3260,8 +3274,8 @@ fun PlayerDialog(
                                     showAudioSheet = false
                                 },
                                 shape = RoundedCornerShape(12.dp),
-                                color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
-                                border = if (isSelected) BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.65f)) else null,
+                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)) else null,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
@@ -3276,14 +3290,14 @@ fun PlayerDialog(
                                         Icon(
                                             imageVector = Icons.Default.RecordVoiceOver,
                                             contentDescription = null,
-                                            tint = if (isSelected) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.8f),
+                                            tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                                             modifier = Modifier.size(20.dp)
                                         )
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Column {
                                             Text(
                                                 text = option.displayName,
-                                                color = Color.White,
+                                                color = MaterialTheme.colorScheme.onSurface,
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                             )
@@ -3293,7 +3307,7 @@ fun PlayerDialog(
                                             ).joinToString(" • ")
                                             Text(
                                                 text = subtitleParts,
-                                                color = Color.White.copy(alpha = 0.6f),
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                                 style = MaterialTheme.typography.labelSmall
                                             )
                                         }
@@ -3303,7 +3317,7 @@ fun PlayerDialog(
                                         Icon(
                                             imageVector = Icons.Default.CheckCircle,
                                             contentDescription = "Selected",
-                                            tint = Color(0xFFA5B4FC),
+                                            tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(22.dp)
                                         )
                                     }
@@ -3348,7 +3362,7 @@ fun PlayerDialog(
                     .widthIn(max = 680.dp)
                     .fillMaxWidth()
                     .fillMaxHeight(if (isLandscape) 0.86f else 0.62f),
-                color = Color(0xFF1E1E24),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 shadowElevation = 16.dp
             ) {
@@ -3362,7 +3376,7 @@ fun PlayerDialog(
                             .align(Alignment.CenterHorizontally)
                             .padding(vertical = 8.dp)
                             .size(width = 44.dp, height = 4.dp)
-                            .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
                     )
 
                     Row(
@@ -3372,12 +3386,12 @@ fun PlayerDialog(
                         Icon(
                             imageVector = Icons.Default.Extension,
                             contentDescription = null,
-                            tint = Color(0xFFA5B4FC),
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(22.dp)
                         )
                         Text(
                             text = "Source Plugins",
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
@@ -3386,7 +3400,7 @@ fun PlayerDialog(
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = "Select an installed KAnime source plugin for streaming",
-                        color = Color.White.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         style = MaterialTheme.typography.bodySmall
                     )
 
@@ -3407,10 +3421,10 @@ fun PlayerDialog(
                                 onClick = { sourceFilterTab = tabKey },
                                 label = { Text(tabLabel) },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Color(0xFF333C57),
-                                    selectedLabelColor = Color(0xFFA5B4FC),
-                                    containerColor = Color(0xFF282830),
-                                    labelColor = Color.White
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                    labelColor = MaterialTheme.colorScheme.onSurface
                                 ),
                                 shape = RoundedCornerShape(12.dp)
                             )
@@ -3422,18 +3436,18 @@ fun PlayerDialog(
                         OutlinedTextField(
                             value = extensionSearchQuery,
                             onValueChange = { extensionSearchQuery = it },
-                            placeholder = { Text("Search plugins...", color = Color.White.copy(alpha = 0.5f)) },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White.copy(alpha = 0.6f)) },
+                            placeholder = { Text("Search plugins...", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)) },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFF282830),
-                                unfocusedContainerColor = Color(0xFF282830),
-                                focusedBorderColor = Color(0xFFA5B4FC),
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
                                 unfocusedBorderColor = Color.Transparent,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
                             )
                         )
                     }
@@ -3454,18 +3468,18 @@ fun PlayerDialog(
                                 Icon(
                                     imageVector = Icons.Default.ExtensionOff,
                                     contentDescription = null,
-                                    tint = Color.White.copy(alpha = 0.45f),
+                                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                                     modifier = Modifier.size(32.dp)
                                 )
                                 Text(
                                     text = if (sourceFilterTab == "Installed") "No plugins installed yet" else "No matching plugins found",
-                                    color = Color.White.copy(alpha = 0.8f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
                                     text = "Install or manage plugins in Settings → Video Source Plugins",
-                                    color = Color.White.copy(alpha = 0.55f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                                     style = MaterialTheme.typography.bodySmall
                                 )
                             }
@@ -3502,8 +3516,8 @@ fun PlayerDialog(
                                         showSourceSheet = false
                                     },
                                     shape = RoundedCornerShape(12.dp),
-                                    color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
-                                    border = if (isSelected) BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.65f)) else null,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                    border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)) else null,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -3517,9 +3531,9 @@ fun PlayerDialog(
                                         ) {
                                             Surface(
                                                 color = when {
-                                                    isSelected && canUse -> Color(0xFF4F5D95)
-                                                    canUse -> Color(0xFF37474F)
-                                                    else -> Color(0xFF32323C)
+                                                    isSelected && canUse -> MaterialTheme.colorScheme.primaryContainer
+                                                    canUse -> MaterialTheme.colorScheme.secondaryContainer
+                                                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
                                                 },
                                                 shape = CircleShape,
                                                 modifier = Modifier.size(38.dp)
@@ -3528,7 +3542,7 @@ fun PlayerDialog(
                                                     Icon(
                                                         imageVector = if (canUse) Icons.Default.Extension else Icons.Default.ExtensionOff,
                                                         contentDescription = null,
-                                                        tint = if (canUse) Color.White else Color.White.copy(alpha = 0.45f),
+                                                        tint = if (canUse) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                                                         modifier = Modifier.size(20.dp)
                                                     )
                                                 }
@@ -3541,13 +3555,13 @@ fun PlayerDialog(
                                                 ) {
                                                     Text(
                                                         text = plugin.name,
-                                                        color = if (canUse) Color.White else Color.White.copy(alpha = 0.6f),
+                                                        color = if (canUse) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                                         style = MaterialTheme.typography.bodyLarge,
                                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                                     )
                                                     Text(
                                                         text = "v${plugin.installedVersion ?: plugin.version}",
-                                                        color = Color(0xFFA5B4FC).copy(alpha = if (canUse) 0.9f else 0.5f),
+                                                        color = MaterialTheme.colorScheme.primary.copy(alpha = if (canUse) 0.9f else 0.5f),
                                                         style = MaterialTheme.typography.labelSmall,
                                                         fontWeight = FontWeight.SemiBold
                                                     )
@@ -3560,9 +3574,9 @@ fun PlayerDialog(
                                                 Text(
                                                     text = "$statusText • ${plugin.author}",
                                                     color = when {
-                                                        plugin.isInstalled && plugin.isEnabled -> Color(0xFF4ADE80).copy(alpha = 0.9f)
-                                                        plugin.isInstalled -> Color(0xFFFBBF24).copy(alpha = 0.85f)
-                                                        else -> Color.White.copy(alpha = 0.45f)
+                                                        plugin.isInstalled && plugin.isEnabled -> MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+                                                        plugin.isInstalled -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.85f)
+                                                        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
                                                     },
                                                     style = MaterialTheme.typography.labelSmall
                                                 )
@@ -3573,7 +3587,7 @@ fun PlayerDialog(
                                             Icon(
                                                 Icons.Default.CheckCircle,
                                                 contentDescription = "Selected",
-                                                tint = Color(0xFFA5B4FC),
+                                                tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(22.dp)
                                             )
                                         }
@@ -3602,7 +3616,7 @@ fun PlayerDialog(
                     .widthIn(max = 680.dp)
                     .fillMaxWidth()
                     .wrapContentHeight(),
-                color = Color(0xFF1E1E24),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 shadowElevation = 16.dp
             ) {
@@ -3616,12 +3630,12 @@ fun PlayerDialog(
                             .align(Alignment.CenterHorizontally)
                             .padding(vertical = 8.dp)
                             .size(width = 44.dp, height = 4.dp)
-                            .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
                     )
 
                     Text(
                         text = "Playback Speed",
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
                     )
@@ -3637,7 +3651,7 @@ fun PlayerDialog(
                                 showSpeedSheet = false
                             },
                             shape = RoundedCornerShape(12.dp),
-                            color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
+                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp)
@@ -3649,7 +3663,7 @@ fun PlayerDialog(
                             ) {
                                 Text(
                                     text = if (spd == 1.0f) "1.0x (Normal)" else "${spd}x",
-                                    color = Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                 )
@@ -3657,7 +3671,7 @@ fun PlayerDialog(
                                     Icon(
                                         Icons.Default.CheckCircle,
                                         contentDescription = "Selected",
-                                        tint = Color(0xFFA5B4FC),
+                                        tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -3685,7 +3699,7 @@ fun PlayerDialog(
                 modifier = Modifier
                     .widthIn(max = 600.dp)
                     .fillMaxWidth(),
-                color = Color(0xFF1E1E24),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 shadowElevation = 16.dp
             ) {
@@ -3700,7 +3714,7 @@ fun PlayerDialog(
                             .align(Alignment.CenterHorizontally)
                             .padding(vertical = 4.dp)
                             .size(width = 44.dp, height = 4.dp)
-                            .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
                     )
 
                     Row(
@@ -3715,12 +3729,12 @@ fun PlayerDialog(
                             Icon(
                                 imageVector = Icons.Default.AspectRatio,
                                 contentDescription = null,
-                                tint = Color(0xFFA5B4FC),
+                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(22.dp)
                             )
                             Text(
                                 text = "Picture & Aspect Ratio",
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold
                             )
@@ -3733,7 +3747,7 @@ fun PlayerDialog(
                                 aspectRatioToastMessage = "Picture reset to Fit (100%)"
                             }
                         ) {
-                            Text("Reset", color = Color(0xFFA5B4FC), fontWeight = FontWeight.SemiBold)
+                            Text("Reset", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                         }
                     }
 
@@ -3748,8 +3762,8 @@ fun PlayerDialog(
                                     aspectRatioToastMessage = mode.toastLabel
                                 },
                                 shape = RoundedCornerShape(12.dp),
-                                color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
-                                border = if (isSelected) BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.65f)) else null,
+                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)) else null,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
@@ -3760,13 +3774,13 @@ fun PlayerDialog(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = mode.title,
-                                            color = Color.White,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                         )
                                         Text(
                                             text = mode.subtitle,
-                                            color = Color.White.copy(alpha = 0.6f),
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                             style = MaterialTheme.typography.labelSmall
                                         )
                                     }
@@ -3774,7 +3788,7 @@ fun PlayerDialog(
                                         Icon(
                                             imageVector = Icons.Default.CheckCircle,
                                             contentDescription = "Selected",
-                                            tint = Color(0xFFA5B4FC),
+                                            tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
@@ -3783,7 +3797,7 @@ fun PlayerDialog(
                         }
                     }
 
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
 
                     // Live Video Zoom Slider (100% - 150%)
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -3794,13 +3808,13 @@ fun PlayerDialog(
                         ) {
                             Text(
                                 text = "Video Zoom",
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
                                 text = "${(videoZoom * 100).toInt()}%",
-                                color = Color(0xFFA5B4FC),
+                                color = MaterialTheme.colorScheme.primary,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold
                             )
@@ -3810,9 +3824,9 @@ fun PlayerDialog(
                             onValueChange = { videoZoom = it },
                             valueRange = 1.0f..1.5f,
                             colors = SliderDefaults.colors(
-                                thumbColor = Color(0xFFA5B4FC),
-                                activeTrackColor = Color(0xFFA5B4FC),
-                                inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
                             )
                         )
                     }
@@ -3837,7 +3851,7 @@ fun PlayerDialog(
                 modifier = Modifier
                     .widthIn(max = 600.dp)
                     .fillMaxWidth(),
-                color = Color(0xFF1E1E24),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 shadowElevation = 16.dp
             ) {
@@ -3852,20 +3866,20 @@ fun PlayerDialog(
                             .align(Alignment.CenterHorizontally)
                             .padding(vertical = 4.dp)
                             .size(width = 44.dp, height = 4.dp)
-                            .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
                     )
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.AutoAwesome,
                             contentDescription = null,
-                            tint = Color(0xFFA5B4FC),
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(22.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Anime4K Shaders",
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
@@ -3873,14 +3887,14 @@ fun PlayerDialog(
 
                     animeEnhancementStatus?.let { status ->
                         Surface(
-                            color = Color(0xFF333C57),
+                            color = MaterialTheme.colorScheme.primaryContainer,
                             shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.5f)),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
                                 text = "Active: ${status.detailLabel()}",
-                                color = Color(0xFFA5B4FC),
+                                color = MaterialTheme.colorScheme.primary,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
@@ -3896,13 +3910,13 @@ fun PlayerDialog(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Anime4K 2x Upscaler",
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
                                 text = "${animeUpscaleQuality.label} + anti-ringing Catmull-Rom",
-                                color = Color.White.copy(alpha = 0.65f),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
@@ -3919,7 +3933,7 @@ fun PlayerDialog(
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
                                 text = "CNN Quality Model",
-                                color = Color.White.copy(alpha = 0.75f),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -3939,10 +3953,10 @@ fun PlayerDialog(
                                         },
                                         label = { Text(preset.label) },
                                         colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = Color(0xFF333C57),
-                                            selectedLabelColor = Color(0xFFA5B4FC),
-                                            containerColor = Color(0xFF282830),
-                                            labelColor = Color.White
+                                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                            selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                            labelColor = MaterialTheme.colorScheme.onSurface
                                         ),
                                         shape = RoundedCornerShape(10.dp)
                                     )
@@ -3950,13 +3964,13 @@ fun PlayerDialog(
                             }
                             Text(
                                 text = animeUpscaleQuality.description,
-                                color = Color.White.copy(alpha = 0.55f),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
                     }
 
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -3966,13 +3980,13 @@ fun PlayerDialog(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Anime Line Sharpening",
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
                                 text = "CNN restore, HQ darken/thin & halo-free ink sharpening",
-                                color = Color.White.copy(alpha = 0.65f),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
@@ -3989,7 +4003,7 @@ fun PlayerDialog(
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
                                 text = "Line Sharpening Intensity",
-                                color = Color.White.copy(alpha = 0.75f),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -4007,10 +4021,10 @@ fun PlayerDialog(
                                         },
                                         label = { Text(level.label) },
                                         colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = Color(0xFF333C57),
-                                            selectedLabelColor = Color(0xFFA5B4FC),
-                                            containerColor = Color(0xFF282830),
-                                            labelColor = Color.White
+                                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                            selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                            labelColor = MaterialTheme.colorScheme.onSurface
                                         ),
                                         shape = RoundedCornerShape(10.dp)
                                     )
@@ -4023,6 +4037,7 @@ fun PlayerDialog(
                 }
             }
         }
+    }
     }
 }
 
@@ -4083,17 +4098,16 @@ private fun BoxScope.SkipSegmentOverlay(
             .zIndex(8f)
     ) {
         val current = segment ?: return@AnimatedVisibility
-        Surface(
+        GlassSurface(
             onClick = { onSkip(current) },
-            color = Color(0xFF1A1D2B).copy(alpha = 0.90f),
-            shape = RoundedCornerShape(if (compact) 18.dp else 22.dp),
-            border = BorderStroke(1.2.dp, Color(0xFFA5B4FC)),
-            shadowElevation = 6.dp
+            shape = PillShape,
+            overMedia = true,
+            accentTint = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
         ) {
             Row(
                 modifier = Modifier.padding(
-                    horizontal = if (compact) 12.dp else 18.dp,
-                    vertical = if (compact) 7.dp else 10.dp
+                    horizontal = if (compact) 14.dp else 18.dp,
+                    vertical = if (compact) 9.dp else 12.dp
                 ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -4101,14 +4115,14 @@ private fun BoxScope.SkipSegmentOverlay(
                 Icon(
                     imageVector = Icons.Default.SkipNext,
                     contentDescription = current.label,
-                    tint = Color(0xFFA5B4FC),
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(if (compact) 18.dp else 22.dp)
                 )
                 Text(
                     text = current.label,
-                    color = Color.White,
-                    fontSize = if (compact) 12.sp else 14.sp,
-                    fontWeight = FontWeight.Bold
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
@@ -4129,14 +4143,13 @@ private fun BoxScope.DoubleTapSeekOverlay(
             .align(if (side == "left") Alignment.CenterStart else Alignment.CenterEnd)
             .padding(horizontal = if (compact) 24.dp else 64.dp)
     ) {
-        Surface(
-            color = Color.Black.copy(alpha = 0.72f),
-            shape = RoundedCornerShape(28.dp),
-            border = BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.45f))
+        GlassSurface(
+            shape = PillShape,
+            overMedia = true
         ) {
             Row(
                 modifier = Modifier.padding(
-                    horizontal = if (compact) 14.dp else 20.dp,
+                    horizontal = if (compact) 16.dp else 20.dp,
                     vertical = if (compact) 10.dp else 14.dp
                 ),
                 verticalAlignment = Alignment.CenterVertically,
@@ -4145,13 +4158,13 @@ private fun BoxScope.DoubleTapSeekOverlay(
                 Icon(
                     imageVector = if (side == "left") Icons.Default.FastRewind else Icons.Default.FastForward,
                     contentDescription = null,
-                    tint = Color(0xFFA5B4FC),
-                    modifier = Modifier.size(if (compact) 22.dp else 28.dp)
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(if (compact) 22.dp else 26.dp)
                 )
                 Text(
                     text = if (side == "left") "-${seconds}s" else "+${seconds}s",
-                    color = Color.White,
-                    fontSize = if (compact) 14.sp else 17.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -4298,7 +4311,7 @@ private fun extractEmbeddedAudioTracks(tracks: Tracks, fallbackAudioType: String
     return result
 }
 
-// Reusable Action Pill Button (Image 1)
+// Reusable Liquid Glass Action Pill Button
 @Composable
 private fun ActionPill(
     icon: ImageVector,
@@ -4306,27 +4319,35 @@ private fun ActionPill(
     isActive: Boolean = false,
     onClick: () -> Unit
 ) {
-    Surface(
+    val contentTint = if (isActive) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    GlassSurface(
         onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
-        color = if (isActive) Color(0xFF333C57) else Color(0xFF22222A),
-        border = if (isActive) BorderStroke(1.dp, Color(0xFFA5B4FC)) else null
+        shape = PillShape,
+        showShadow = false,
+        accentTint = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f) else null,
+        contentColor = contentTint
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            modifier = Modifier
+                .heightIn(min = 42.dp)
+                .padding(horizontal = 14.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (isActive) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.85f),
+                tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(16.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = label,
-                color = if (isActive) Color(0xFFA5B4FC) else Color.White,
-                fontSize = 12.sp,
+                color = contentTint,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold
             )
         }
@@ -4384,4 +4405,46 @@ private fun formatTime(ms: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return String.format("%02d:%02d", minutes, seconds)
+}
+
+@Preview(name = "Player HUD Light Host Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.PHONE)
+@Preview(name = "Player HUD Dark Host Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, device = Devices.PHONE)
+@Preview(name = "Player HUD Tablet", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, device = Devices.TABLET)
+@Composable
+private fun PlayerHudPreview() {
+    // Player is always dark espresso + latte regardless of host theme
+    KAnimeTheme(darkTheme = true, dynamicColor = false, animateTransition = false) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .background(MaterialTheme.colorScheme.scrim)
+                .padding(16.dp)
+        ) {
+            GlassSurface(
+                shape = CircleShape,
+                overMedia = true,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(64.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Pause,
+                    contentDescription = "Pause",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(34.dp)
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ActionPill(icon = Icons.Default.Subtitles, label = "Subtitles", isActive = true, onClick = {})
+                ActionPill(icon = Icons.Default.Speed, label = "1.0x", isActive = false, onClick = {})
+            }
+        }
+    }
 }

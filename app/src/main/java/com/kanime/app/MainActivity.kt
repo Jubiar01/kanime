@@ -12,39 +12,76 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.core.content.ContextCompat
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.* 
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.tooling.preview.Devices
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.kanime.app.data.api.CatalogConfig
 import com.kanime.app.data.api.WatchHistoryStore
 import com.kanime.app.data.plugin.PluginManager
-import com.kanime.app.ui.screens.*
+import com.kanime.app.ui.components.GlassBottomBar
+import com.kanime.app.ui.components.GlassNavItem
+import com.kanime.app.ui.components.GlassNavigationRail
+import com.kanime.app.ui.components.GlassTopBar
+import com.kanime.app.ui.screens.DetailScreen
+import com.kanime.app.ui.screens.ExploreScreen
+import com.kanime.app.ui.screens.HomeScreen
+import com.kanime.app.ui.screens.PlayerDialog
+import com.kanime.app.ui.screens.SettingsScreen
+import com.kanime.app.ui.screens.WatchlistScreen
 import com.kanime.app.ui.theme.KAnimeTheme
+import com.kanime.app.ui.theme.KanimeAmbientBackdrop
+import com.kanime.app.ui.theme.LocalWindowSizeClass
+import com.kanime.app.ui.theme.ThemeMode
+import com.kanime.app.ui.theme.ThemePreferences
 import com.kanime.app.ui.viewmodel.AnimeUiState
 import com.kanime.app.ui.viewmodel.AnimeViewModel
 import com.kanime.app.ui.viewmodel.NavTab
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 class MainActivity : ComponentActivity() {
 
@@ -66,7 +103,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Initialize catalog config, persisted watchlist/history & plugin status sync
+        // Initialize persisted preferences, catalog config, watchlist/history & plugin status sync
+        ThemePreferences.init(applicationContext)
         CatalogConfig.init(applicationContext)
         WatchHistoryStore.init(applicationContext)
         PluginManager.checkPluginStatus(applicationContext)
@@ -89,18 +127,27 @@ class MainActivity : ComponentActivity() {
         setContent {
             val uiState by viewModel.uiState.collectAsState()
             val isInPipMode by isInPipModeFlow.collectAsState()
+            val themeMode by ThemePreferences.themeModeFlow.collectAsState()
+            val dynamicColor by ThemePreferences.dynamicColorFlow.collectAsState()
+            val systemDark = isSystemInDarkTheme()
 
-            KAnimeTheme(darkTheme = uiState.isDarkTheme) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    KAnimeApp(
-                        viewModel = viewModel,
-                        uiState = uiState,
-                        isInPipMode = isInPipMode
-                    )
-                }
+            val resolvedDarkTheme = when (themeMode) {
+                ThemeMode.SYSTEM -> systemDark
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
+
+            KAnimeTheme(
+                darkTheme = resolvedDarkTheme,
+                dynamicColor = dynamicColor
+            ) {
+                KAnimeApp(
+                    viewModel = viewModel,
+                    uiState = uiState,
+                    isDarkTheme = resolvedDarkTheme,
+                    dynamicColor = dynamicColor,
+                    isInPipMode = isInPipMode
+                )
             }
         }
     }
@@ -115,7 +162,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        // Auto-enter PiP on Android 8.0–11 when pressing Home during active video playback
         if (Build.VERSION.SDK_INT in Build.VERSION_CODES.O until Build.VERSION_CODES.S) {
             onUserLeaveHintPipHandler?.invoke()
         }
@@ -126,7 +172,6 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             _isInPipMode.value = isInPictureInPictureMode
         }
-        // Immediately refresh plugin status when returning from system installer/uninstaller
         PluginManager.checkPluginStatus(applicationContext)
     }
 
@@ -138,16 +183,20 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KAnimeApp(
     viewModel: AnimeViewModel,
     uiState: AnimeUiState,
+    isDarkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = false,
     isInPipMode: Boolean = false
 ) {
-    // If an episode is playing, present the full-screen player directly on the Activity window
+    val context = LocalContext.current
     val autoPlayNext by CatalogConfig.autoPlayNextFlow.collectAsState()
     val playing = uiState.playingEpisode
+
+    // Full-screen player is always presented in dark theme regardless of app theme,
+    // while honoring the user's Dynamic Color setting.
     if (playing != null) {
         val anime = playing.first
         val currentEp = playing.second
@@ -155,196 +204,251 @@ fun KAnimeApp(
         val nextEp = sortedEps.firstOrNull { it.episodeNumber > currentEp.episodeNumber }
         val prevEp = sortedEps.lastOrNull { it.episodeNumber < currentEp.episodeNumber }
 
-        PlayerDialog(
-            anime = anime,
-            episode = currentEp,
-            initialPositionMs = uiState.playingInitialPositionMs,
-            autoPlayNext = autoPlayNext,
-            isInPipMode = isInPipMode,
-            onToggleAutoPlayNext = { viewModel.setAutoPlayNext(it) },
-            onSaveProgress = { posMs, durMs -> viewModel.saveWatchProgress(anime, currentEp, posMs, durMs) },
-            onDismiss = { viewModel.closePlayer() },
-            onNextEpisode = if (nextEp != null) {
-                { viewModel.playEpisode(anime, nextEp) }
-            } else null,
-            onPreviousEpisode = if (prevEp != null) {
-                { viewModel.playEpisode(anime, prevEp) }
-            } else null,
-            onSelectEpisode = { ep ->
-                viewModel.playEpisode(anime, ep)
-            }
-        )
+        KAnimeTheme(
+            darkTheme = true,
+            dynamicColor = dynamicColor,
+            updateSystemBars = false,
+            animateTransition = false
+        ) {
+            PlayerDialog(
+                anime = anime,
+                episode = currentEp,
+                initialPositionMs = uiState.playingInitialPositionMs,
+                autoPlayNext = autoPlayNext,
+                isInPipMode = isInPipMode,
+                onToggleAutoPlayNext = { viewModel.setAutoPlayNext(it) },
+                onSaveProgress = { posMs, durMs -> viewModel.saveWatchProgress(anime, currentEp, posMs, durMs) },
+                onDismiss = { viewModel.closePlayer() },
+                onNextEpisode = if (nextEp != null) {
+                    { viewModel.playEpisode(anime, nextEp) }
+                } else null,
+                onPreviousEpisode = if (prevEp != null) {
+                    { viewModel.playEpisode(anime, prevEp) }
+                } else null,
+                onSelectEpisode = { ep ->
+                    viewModel.playEpisode(anime, ep)
+                }
+            )
+        }
         return
     }
 
-    // Intercept back button if Detail Screen is open
     BackHandler(enabled = uiState.selectedAnime != null) {
         viewModel.closeAnime()
     }
 
-    Scaffold(
-        topBar = {
-            if (uiState.selectedAnime == null) {
-                TopAppBar(
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "K",
-                                style = MaterialTheme.typography.titleLarge.copy(fontSize = 24.sp),
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "Anime",
-                                style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp),
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { viewModel.toggleTheme() }) {
-                            Icon(
-                                imageVector = if (uiState.isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                contentDescription = "Toggle Theme",
-                                tint = MaterialTheme.colorScheme.onBackground
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background
+    KAnimeShell(
+        currentTab = uiState.currentTab,
+        watchlistCount = uiState.watchlistIds.size,
+        showChrome = uiState.selectedAnime == null,
+        isDarkTheme = isDarkTheme,
+        onSelectTab = { viewModel.selectTab(it) },
+        onToggleTheme = { ThemePreferences.cycleThemeMode(context, isDarkTheme) }
+    ) { topInsetPadding, bottomInsetPadding ->
+        val selected = uiState.selectedAnime
+        if (selected != null) {
+            DetailScreen(
+                anime = selected,
+                viewModel = viewModel,
+                uiState = uiState,
+                onBackClick = { viewModel.closeAnime() }
+            )
+        } else {
+            AnimatedContent(
+                targetState = uiState.currentTab,
+                transitionSpec = {
+                    fadeIn(tween(180)) togetherWith fadeOut(tween(140))
+                },
+                label = "TabContent",
+                modifier = Modifier.fillMaxSize()
+            ) { tab ->
+                when (tab) {
+                    NavTab.HOME -> HomeScreen(
+                        viewModel = viewModel,
+                        uiState = uiState,
+                        topContentPadding = topInsetPadding,
+                        bottomContentPadding = bottomInsetPadding,
+                        onSeeAllClick = { viewModel.selectTab(NavTab.EXPLORE) }
                     )
-                )
-            }
-        },
-        bottomBar = {
-            if (uiState.selectedAnime == null) {
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 8.dp
-                ) {
-                    NavigationBarItem(
-                        selected = uiState.currentTab == NavTab.HOME,
-                        onClick = { viewModel.selectTab(NavTab.HOME) },
-                        icon = {
-                            Icon(
-                                if (uiState.currentTab == NavTab.HOME) Icons.Filled.Home else Icons.Outlined.Home,
-                                contentDescription = "Home"
-                            )
-                        },
-                        label = { Text("Home") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer
-                        )
+                    NavTab.EXPLORE -> ExploreScreen(
+                        viewModel = viewModel,
+                        uiState = uiState,
+                        topContentPadding = topInsetPadding,
+                        bottomContentPadding = bottomInsetPadding
                     )
-
-                    NavigationBarItem(
-                        selected = uiState.currentTab == NavTab.EXPLORE,
-                        onClick = { viewModel.selectTab(NavTab.EXPLORE) },
-                        icon = {
-                            Icon(
-                                if (uiState.currentTab == NavTab.EXPLORE) Icons.Filled.Explore else Icons.Outlined.Explore,
-                                contentDescription = "Explore"
-                            )
-                        },
-                        label = { Text("Explore") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer
-                        )
+                    NavTab.WATCHLIST -> WatchlistScreen(
+                        viewModel = viewModel,
+                        uiState = uiState,
+                        topContentPadding = topInsetPadding,
+                        bottomContentPadding = bottomInsetPadding
                     )
-
-                    NavigationBarItem(
-                        selected = uiState.currentTab == NavTab.WATCHLIST,
-                        onClick = { viewModel.selectTab(NavTab.WATCHLIST) },
-                        icon = {
-                            BadgedBox(
-                                badge = {
-                                    if (uiState.watchlistIds.isNotEmpty()) {
-                                        Badge(containerColor = MaterialTheme.colorScheme.primary) {
-                                            Text("${uiState.watchlistIds.size}")
-                                        }
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    if (uiState.currentTab == NavTab.WATCHLIST) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                                    contentDescription = "Watchlist"
-                                )
-                            }
-                        },
-                        label = { Text("Watchlist") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer
-                        )
-                    )
-
-                    NavigationBarItem(
-                        selected = uiState.currentTab == NavTab.SETTINGS,
-                        onClick = { viewModel.selectTab(NavTab.SETTINGS) },
-                        icon = {
-                            Icon(
-                                if (uiState.currentTab == NavTab.SETTINGS) Icons.Filled.Settings else Icons.Outlined.Settings,
-                                contentDescription = "Settings"
-                            )
-                        },
-                        label = { Text("Settings") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer
-                        )
+                    NavTab.SETTINGS -> SettingsScreen(
+                        viewModel = viewModel,
+                        uiState = uiState,
+                        topContentPadding = topInsetPadding,
+                        bottomContentPadding = bottomInsetPadding
                     )
                 }
             }
         }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            val selected = uiState.selectedAnime
-            if (selected != null) {
-                DetailScreen(
-                    anime = selected,
-                    viewModel = viewModel,
-                    uiState = uiState,
-                    onBackClick = { viewModel.closeAnime() }
-                )
-            } else {
-                AnimatedContent(
-                    targetState = uiState.currentTab,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() },
-                    label = "TabContent"
-                ) { tab ->
-                    when (tab) {
-                        NavTab.HOME -> HomeScreen(
-                            viewModel = viewModel,
-                            uiState = uiState,
-                            onSeeAllClick = {
-                                viewModel.selectTab(NavTab.EXPLORE)
-                            }
+    }
+}
+
+@Composable
+internal fun KAnimeShell(
+    currentTab: NavTab,
+    watchlistCount: Int,
+    showChrome: Boolean,
+    isDarkTheme: Boolean,
+    onSelectTab: (NavTab) -> Unit,
+    onToggleTheme: () -> Unit,
+    content: @Composable (topContentPadding: androidx.compose.ui.unit.Dp, bottomContentPadding: androidx.compose.ui.unit.Dp) -> Unit
+) {
+    val windowSize = LocalWindowSizeClass.current
+    val homeLabel = stringResource(R.string.nav_home)
+    val exploreLabel = stringResource(R.string.nav_explore)
+    val libraryLabel = stringResource(R.string.nav_watchlist)
+    val settingsLabel = stringResource(R.string.nav_settings)
+
+    val navItems = remember(watchlistCount, homeLabel, exploreLabel, libraryLabel, settingsLabel) {
+        listOf(
+            GlassNavItem(NavTab.HOME.name, homeLabel, Icons.Filled.Home, Icons.Outlined.Home),
+            GlassNavItem(NavTab.EXPLORE.name, exploreLabel, Icons.Filled.Explore, Icons.Outlined.Explore),
+            GlassNavItem(NavTab.WATCHLIST.name, libraryLabel, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder, badgeCount = watchlistCount),
+            GlassNavItem(NavTab.SETTINGS.name, settingsLabel, Icons.Filled.Settings, Icons.Outlined.Settings)
+        )
+    }
+
+    val useRail = windowSize.useNavigationRail
+
+    KanimeAmbientBackdrop {
+        if (useRail && showChrome) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .displayCutoutPadding()
+            ) {
+                GlassNavigationRail(
+                    items = navItems,
+                    selectedId = currentTab.name,
+                    onSelect = { id -> onSelectTab(NavTab.valueOf(id)) },
+                    header = {
+                        Text(
+                            text = "K",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                        NavTab.EXPLORE -> ExploreScreen(
-                            viewModel = viewModel,
-                            uiState = uiState
-                        )
-                        NavTab.WATCHLIST -> WatchlistScreen(
-                            viewModel = viewModel,
-                            uiState = uiState
-                        )
-                        NavTab.SETTINGS -> SettingsScreen(
-                            viewModel = viewModel,
-                            uiState = uiState
-                        )
+                    },
+                    footer = {
+                        IconButton(onClick = onToggleTheme) {
+                            Icon(
+                                imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                contentDescription = stringResource(R.string.action_toggle_theme),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
+                )
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .statusBarsPadding()
+                ) {
+                    content(12.dp, 24.dp)
                 }
+            }
+        } else {
+            Box(modifier = Modifier.fillMaxSize()) {
+                val topPad = if (showChrome) 76.dp else 0.dp
+                val bottomPad = if (showChrome) 104.dp else 0.dp
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .let { if (showChrome) it.statusBarsPadding() else it }
+                ) {
+                    content(topPad, bottomPad)
+                }
+
+                if (showChrome) {
+                    GlassTopBar(
+                        title = {
+                            Text(
+                                text = buildAnnotatedString {
+                                    withStyle(
+                                        SpanStyle(
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    ) {
+                                        append("K")
+                                    }
+                                    withStyle(
+                                        SpanStyle(
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    ) {
+                                        append("anime")
+                                    }
+                                },
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                        },
+                        actions = {
+                            IconButton(onClick = onToggleTheme) {
+                                Icon(
+                                    imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                    contentDescription = stringResource(R.string.action_toggle_theme),
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+
+                    GlassBottomBar(
+                        items = navItems,
+                        selectedId = currentTab.name,
+                        onSelect = { id -> onSelectTab(NavTab.valueOf(id)) },
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Preview(name = "Shell Light Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.PHONE)
+@Preview(name = "Shell Dark Phone", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, device = Devices.PHONE)
+@Preview(name = "Shell Light Tablet", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, device = Devices.TABLET)
+@Preview(name = "Shell Dark Foldable", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, device = Devices.FOLDABLE)
+@Composable
+private fun KAnimeShellPreview() {
+    KAnimeTheme(animateTransition = false) {
+        KAnimeShell(
+            currentTab = NavTab.HOME,
+            watchlistCount = 3,
+            showChrome = true,
+            isDarkTheme = isSystemInDarkTheme(),
+            onSelectTab = {},
+            onToggleTheme = {}
+        ) { topPad, bottomPad ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = topPad, bottom = bottomPad),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Kanime",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
             }
         }
     }
