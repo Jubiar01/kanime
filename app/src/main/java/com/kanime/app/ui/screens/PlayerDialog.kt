@@ -9,6 +9,9 @@ import android.content.res.Configuration
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -17,7 +20,9 @@ import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -50,6 +55,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -62,6 +70,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
@@ -73,15 +82,21 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
-import com.kanime.app.data.api.AnimeUpscalerMode
+import com.kanime.app.data.api.AniSkipApi
 import com.kanime.app.data.api.CatalogConfig
+import com.kanime.app.data.api.EpisodeSkipTimes
+import com.kanime.app.data.api.SkipSegment
 import com.kanime.app.data.model.Anime
 import com.kanime.app.data.model.Episode
 import com.kanime.app.data.plugin.PluginBridge
 import com.kanime.app.data.plugin.PluginManager
 import com.kanime.app.data.plugin.PluginServer
 import com.kanime.app.data.plugin.PluginStream
-import com.kanime.app.ui.player.Anime4kVideoEffect
+import com.kanime.app.ui.player.anime.AnimeEnhancementStatus
+import com.kanime.app.ui.player.anime.AnimeShaderStatusTracker
+import com.kanime.app.ui.player.anime.AnimeShaders
+import com.kanime.app.ui.player.anime.AnimeSharpenStrength
+import com.kanime.app.ui.player.anime.AnimeUpscaleQuality
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -106,8 +121,10 @@ private fun Context.findActivity(): Activity? {
 fun PlayerDialog(
     anime: Anime,
     episode: Episode,
+    initialPositionMs: Long = 0L,
     autoPlayNext: Boolean = true,
     onToggleAutoPlayNext: ((Boolean) -> Unit)? = null,
+    onSaveProgress: ((positionMs: Long, durationMs: Long) -> Unit)? = null,
     onDismiss: () -> Unit,
     onNextEpisode: (() -> Unit)? = null,
     onPreviousEpisode: (() -> Unit)? = null,
@@ -139,15 +156,17 @@ fun PlayerDialog(
     var extensionSearchQuery by remember { mutableStateOf("") }
     var selectedFramework by remember { mutableStateOf("All Sources") }
 
-    // Persisted Anime4K Upscaler & Line Sharpening settings
-    val animeUpscalerMode by CatalogConfig.animeUpscalerModeFlow.collectAsState()
+    // Persisted Anime4K 2x Upscaler & Line Sharpening settings
+    val animeUpscaleEnabled by CatalogConfig.animeUpscaleEnabledFlow.collectAsState()
     val lineSharpeningEnabled by CatalogConfig.animeLineSharpeningFlow.collectAsState()
-    val lineSharpeningStrength by CatalogConfig.animeLineSharpeningStrengthFlow.collectAsState()
-    val isVideoEnhanced = animeUpscalerMode != AnimeUpscalerMode.OFF || lineSharpeningEnabled
-    val qualityBadgeText = when {
-        animeUpscalerMode == AnimeUpscalerMode.ULTRA_4K -> "4K A4K"
-        animeUpscalerMode == AnimeUpscalerMode.FAST -> "A4K 1.5x"
-        lineSharpeningEnabled -> "SHARP"
+    val animeUpscaleQuality by CatalogConfig.animeUpscaleQualityFlow.collectAsState()
+    val animeSharpenStrength by CatalogConfig.animeSharpenStrengthFlow.collectAsState()
+    var animeEnhancementStatus by remember { mutableStateOf<AnimeEnhancementStatus?>(null) }
+    val isVideoEnhanced = animeUpscaleEnabled || lineSharpeningEnabled
+    val qualityBadgeText = animeEnhancementStatus?.badgeLabel() ?: when {
+        animeUpscaleEnabled && lineSharpeningEnabled -> "A4K 2x ${animeUpscaleQuality.shortLabel} • SHARP"
+        animeUpscaleEnabled -> "A4K 2x ${animeUpscaleQuality.shortLabel}"
+        lineSharpeningEnabled -> "A4K SHARP"
         else -> "1080p"
     }
 
@@ -175,10 +194,17 @@ fun PlayerDialog(
     var aspectRatioToastMessage by remember { mutableStateOf<String?>(null) }
     var isEpisodeOrderReversed by remember { mutableStateOf(false) }
 
-    // Auto-Play Next Episode state (reset per episode)
+    // Auto-Play Next Episode & Watch Progress state (reset per episode)
     val autoPlayTriggered = remember(anime.id, episode.episodeNumber) { mutableStateOf(false) }
     val latestAutoPlayNext by rememberUpdatedState(autoPlayNext)
     val latestOnNextEpisode by rememberUpdatedState(onNextEpisode)
+    val latestOnSaveProgress by rememberUpdatedState(onSaveProgress)
+
+    // AniSkip Intro / Recap / Outro timestamps matched to the exact stream duration
+    var skipTimes by remember(anime.id, episode.episodeNumber) { mutableStateOf(EpisodeSkipTimes()) }
+    val activeSkipSegment = remember(skipTimes, currentPositionMs) {
+        skipTimes.activeSegmentAt(currentPositionMs)
+    }
 
     // Audio & Brightness Gestures (Image 6)
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -510,8 +536,32 @@ fun PlayerDialog(
             is StreamResolutionState.Success -> {
                 val stream = state.stream
                 val streamUrl = stream.m3u8 ?: stream.embedUrl
+                val lifecycleOwner = LocalLifecycleOwner.current
+                val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
-                val exoPlayer = remember(streamUrl) {
+                // Remember playback position across clean Anime4K ExoPlayer rebuilds and resume from Watch History
+                val resumePositionRef = remember(streamUrl, anime.id, episode.episodeNumber) {
+                    mutableLongStateOf(initialPositionMs.coerceAtLeast(0L))
+                }
+                val resumePlayWhenReadyRef = remember(streamUrl) { mutableStateOf(true) }
+                LaunchedEffect(streamUrl, anime.id, episode.episodeNumber) {
+                    if (initialPositionMs >= 5_000L) {
+                        aspectRatioToastMessage = "Resumed at ${formatTime(initialPositionMs)}"
+                    }
+                }
+                var videoEffectsDisabledByError by remember(streamUrl) { mutableStateOf(false) }
+                var animeRebuildGeneration by remember(streamUrl) { mutableIntStateOf(0) }
+                val exoVideoEffectsHolder = remember(streamUrl) { ExoVideoEffectsHolder() }
+                val animeStatusTracker = remember(streamUrl) {
+                    AnimeShaderStatusTracker { status ->
+                        mainHandler.post { animeEnhancementStatus = status }
+                    }
+                }
+
+                // Build ExoPlayer with official Anime4K multi-pass GLSL shaders (from NuvioMobile-Enhanced).
+                // When toggling Anime4K 2x Upscaler or Line Sharpening, a clean debounced rebuild
+                // recreates ExoPlayer at the exact saved timestamp so turning effects OFF/ON never stops playback.
+                val exoPlayer = remember(streamUrl, animeRebuildGeneration, videoEffectsDisabledByError) {
                     val httpDataSourceFactory = DefaultHttpDataSource.Factory()
                         .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
                         .setDefaultRequestProperties(
@@ -556,6 +606,23 @@ fun PlayerDialog(
                         )
                     }
 
+                    val upscaleForBuild = CatalogConfig.animeUpscaleEnabled
+                    val sharpenForBuild = CatalogConfig.animeLineSharpening
+                    val qualityForBuild = CatalogConfig.animeUpscaleQuality
+                    val strengthForBuild = CatalogConfig.animeSharpenStrength
+                    val animeVideoEffects = if (videoEffectsDisabledByError) {
+                        emptyList()
+                    } else {
+                        AnimeShaders.exoVideoEffects(
+                            context = context,
+                            upscaleEnabled = upscaleForBuild,
+                            lineSharpenEnabled = sharpenForBuild,
+                            quality = qualityForBuild,
+                            sharpenStrength = strengthForBuild,
+                            statusTracker = animeStatusTracker,
+                        )
+                    }
+
                     ExoPlayer.Builder(context)
                         .setTrackSelector(trackSelector)
                         .setMediaSourceFactory(mediaSourceFactory)
@@ -566,30 +633,50 @@ fun PlayerDialog(
                                 .setSubtitleConfigurations(subtitleConfigs)
                                 .build()
 
-                            try {
-                                val effects = if (animeUpscalerMode != AnimeUpscalerMode.OFF || lineSharpeningEnabled) {
-                                    listOf(
-                                        Anime4kVideoEffect(
-                                            mode = animeUpscalerMode,
-                                            lineSharpeningEnabled = lineSharpeningEnabled,
-                                            lineSharpeningStrength = lineSharpeningStrength
-                                        )
-                                    )
-                                } else {
-                                    emptyList()
+                            if (animeVideoEffects.isNotEmpty()) {
+                                try {
+                                    setVideoEffects(animeVideoEffects)
+                                } catch (t: Throwable) {
+                                    Log.e("PlayerDialog", "Failed to attach Anime4K shaders; falling back", t)
+                                    videoEffectsDisabledByError = true
                                 }
-                                setVideoEffects(effects)
-                            } catch (_: Throwable) {
-                                // Gracefully fall back to standard rendering if GPU effect pipeline is unavailable
+                            } else {
+                                animeEnhancementStatus = null
                             }
 
+                            exoVideoEffectsHolder.update(
+                                pipelineConfigured = animeVideoEffects.isNotEmpty(),
+                                upscaleEnabled = upscaleForBuild,
+                                lineSharpenEnabled = sharpenForBuild,
+                                quality = qualityForBuild,
+                                sharpenStrength = strengthForBuild,
+                            )
+
                             setMediaItem(mediaItem)
+                            val savedPos = resumePositionRef.longValue
+                            if (savedPos > 0L) {
+                                seekTo(savedPos)
+                            }
                             prepare()
-                            playWhenReady = true
+                            playWhenReady = resumePlayWhenReadyRef.value
 
                             addListener(object : Player.Listener {
                                 override fun onIsPlayingChanged(playing: Boolean) {
                                     isPlaying = playing
+                                }
+
+                                override fun onPlayerError(error: PlaybackException) {
+                                    Log.e("PlayerDialog", "ExoPlayer error (code=${error.errorCodeName}): ${error.message}", error)
+                                    if (!videoEffectsDisabledByError && (
+                                            error.errorCode == PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSOR_INIT_FAILED ||
+                                            error.errorCode == PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED
+                                        )
+                                    ) {
+                                        resumePositionRef.longValue = currentPosition.coerceAtLeast(0L)
+                                        resumePlayWhenReadyRef.value = true
+                                        animeEnhancementStatus = null
+                                        videoEffectsDisabledByError = true
+                                    }
                                 }
 
                                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -606,35 +693,73 @@ fun PlayerDialog(
                         }
                 }
 
-                // Live-apply Anime4K Upscaler / Line Sharpening changes mid-playback
-                var hasAppliedInitialEffects by remember(exoPlayer) { mutableStateOf(false) }
-                LaunchedEffect(exoPlayer, animeUpscalerMode, lineSharpeningEnabled, lineSharpeningStrength) {
-                    if (!hasAppliedInitialEffects) {
-                        hasAppliedInitialEffects = true
+                // Debounced clean ExoPlayer rebuild when Anime4K toggles, quality preset, or sharpen strength change
+                LaunchedEffect(exoPlayer, animeUpscaleEnabled, lineSharpeningEnabled, animeUpscaleQuality, animeSharpenStrength) {
+                    if (exoVideoEffectsHolder.matches(animeUpscaleEnabled, lineSharpeningEnabled, animeUpscaleQuality, animeSharpenStrength)) {
                         return@LaunchedEffect
                     }
-                    try {
-                        val savedPos = exoPlayer.currentPosition.coerceAtLeast(0L)
-                        val wasPlaying = exoPlayer.playWhenReady
-                        val effects = if (animeUpscalerMode != AnimeUpscalerMode.OFF || lineSharpeningEnabled) {
-                            listOf(
-                                Anime4kVideoEffect(
-                                    mode = animeUpscalerMode,
-                                    lineSharpeningEnabled = lineSharpeningEnabled,
-                                    lineSharpeningStrength = lineSharpeningStrength
-                                )
-                            )
-                        } else {
-                            emptyList()
-                        }
-                        exoPlayer.stop()
-                        exoPlayer.setVideoEffects(effects)
-                        exoPlayer.prepare()
-                        exoPlayer.seekTo(savedPos)
-                        exoPlayer.playWhenReady = wasPlaying
-                    } catch (_: Throwable) {
-                        // Ignore if device GPU cannot reconfigure video effects dynamically
+                    if (!exoVideoEffectsHolder.pipelineConfigured && !animeUpscaleEnabled && !lineSharpeningEnabled) {
+                        exoVideoEffectsHolder.update(false, false, false, animeUpscaleQuality, animeSharpenStrength)
+                        return@LaunchedEffect
                     }
+                    delay(700L)
+                    resumePositionRef.longValue = exoPlayer.currentPosition.coerceAtLeast(0L)
+                    resumePlayWhenReadyRef.value = exoPlayer.playWhenReady || exoPlayer.isPlaying
+                    videoEffectsDisabledByError = false
+                    animeRebuildGeneration += 1
+                }
+
+                // Pause/resume cleanly when screen turns OFF/ON or app goes to background/foreground
+                DisposableEffect(lifecycleOwner, exoPlayer) {
+                    var wasPlayingOnPause = false
+                    val observer = LifecycleEventObserver { _, event ->
+                        when (event) {
+                            Lifecycle.Event.ON_PAUSE -> {
+                                wasPlayingOnPause = exoPlayer.playWhenReady || exoPlayer.isPlaying
+                                val pausePos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                                val pauseDur = exoPlayer.duration.coerceAtLeast(0L)
+                                resumePositionRef.longValue = pausePos
+                                resumePlayWhenReadyRef.value = wasPlayingOnPause
+                                latestOnSaveProgress?.invoke(pausePos, pauseDur)
+                                exoPlayer.pause()
+                            }
+                            Lifecycle.Event.ON_RESUME -> {
+                                if (exoPlayer.playbackState == Player.STATE_IDLE) {
+                                    val pos = resumePositionRef.longValue
+                                    exoPlayer.prepare()
+                                    if (pos > 0L) exoPlayer.seekTo(pos)
+                                }
+                                if (wasPlayingOnPause) {
+                                    exoPlayer.playWhenReady = true
+                                    exoPlayer.play()
+                                }
+                            }
+                            else -> Unit
+                        }
+                    }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose {
+                        lifecycleOwner.lifecycle.removeObserver(observer)
+                    }
+                }
+
+                fun resumeOrPlay() {
+                    if (exoPlayer.playbackState == Player.STATE_IDLE) {
+                        val pos = resumePositionRef.longValue
+                        exoPlayer.prepare()
+                        if (pos > 0L) exoPlayer.seekTo(pos)
+                    } else if (exoPlayer.playbackState == Player.STATE_ENDED) {
+                        autoPlayTriggered.value = false
+                        exoPlayer.seekTo(0L)
+                    }
+                    resumePlayWhenReadyRef.value = true
+                    exoPlayer.playWhenReady = true
+                    exoPlayer.play()
+                }
+
+                fun pausePlayback() {
+                    resumePlayWhenReadyRef.value = false
+                    exoPlayer.pause()
                 }
 
                 fun performDoubleTapSeek(deltaSeconds: Int) {
@@ -647,6 +772,7 @@ fun PlayerDialog(
                     }
                     exoPlayer.seekTo(targetMs)
                     currentPositionMs = targetMs
+                    resumePositionRef.longValue = targetMs
                     doubleTapSeekSeconds = if (doubleTapSeekSide == side) {
                         doubleTapSeekSeconds + kotlin.math.abs(deltaSeconds)
                     } else {
@@ -657,12 +783,12 @@ fun PlayerDialog(
                 }
 
                 // Keep playback speed in sync
-                LaunchedEffect(playbackSpeed) {
+                LaunchedEffect(exoPlayer, playbackSpeed) {
                     exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed)
                 }
 
                 // Subtitle track selection
-                LaunchedEffect(subtitlesEnabled, selectedSubtitleTrack) {
+                LaunchedEffect(exoPlayer, subtitlesEnabled, selectedSubtitleTrack) {
                     val builder = exoPlayer.trackSelectionParameters.buildUpon()
                     if (!subtitlesEnabled || selectedSubtitleTrack == "Off") {
                         builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
@@ -697,12 +823,35 @@ fun PlayerDialog(
                     exoPlayer.trackSelectionParameters = builder.build()
                 }
 
-                // Poll playback position
+                // Poll playback position & periodically persist Watch History progress
                 LaunchedEffect(exoPlayer) {
+                    var tick = 0
                     while (true) {
-                        currentPositionMs = exoPlayer.currentPosition
-                        durationMs = exoPlayer.duration.coerceAtLeast(0L)
-                        delay(350)
+                        val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                        val dur = exoPlayer.duration.coerceAtLeast(0L)
+                        currentPositionMs = pos
+                        if (pos > 0L) {
+                            resumePositionRef.longValue = pos
+                        }
+                        durationMs = dur
+                        if (tick % 16 == 0 && (pos > 2_000L || dur > 0L)) {
+                            latestOnSaveProgress?.invoke(pos, dur)
+                        }
+                        tick++
+                        delay(250)
+                    }
+                }
+
+                // Fetch AniSkip Intro / Recap / Outro timestamps using the exact stream duration
+                // so skip buttons trigger right when the intro/recap begins on this exact cut.
+                val durationBucket = if (durationMs > 60_000L) (durationMs / 5_000L).toInt() else 0
+                LaunchedEffect(anime.id, anime.malId, episode.episodeNumber, durationBucket) {
+                    if (durationMs > 60_000L) {
+                        skipTimes = AniSkipApi.getSkipTimes(
+                            anime = anime,
+                            episodeNumber = episode.episodeNumber,
+                            episodeLengthSec = durationMs / 1000.0,
+                        )
                     }
                 }
 
@@ -725,8 +874,19 @@ fun PlayerDialog(
                 }
 
                 DisposableEffect(exoPlayer) {
+                    playerView.player = exoPlayer
+                    playerView.onResume()
                     onDispose {
-                        playerView.player = null
+                        val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                        val dur = exoPlayer.duration.coerceAtLeast(0L)
+                        if (pos > 0L) resumePositionRef.longValue = pos
+                        if (pos > 0L || dur > 0L) {
+                            latestOnSaveProgress?.invoke(pos, dur)
+                        }
+                        resumePlayWhenReadyRef.value = exoPlayer.playWhenReady || exoPlayer.isPlaying
+                        if (playerView.player === exoPlayer) {
+                            playerView.player = null
+                        }
                         exoPlayer.release()
                     }
                 }
@@ -783,7 +943,7 @@ fun PlayerDialog(
                                                 when {
                                                     offset.x < size.width * 0.45f -> performDoubleTapSeek(-10)
                                                     offset.x > size.width * 0.55f -> performDoubleTapSeek(+10)
-                                                    else -> if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                                    else -> if (exoPlayer.isPlaying) pausePlayback() else resumeOrPlay()
                                                 }
                                             }
                                         )
@@ -854,15 +1014,7 @@ fun PlayerDialog(
                                     // Center Play / Pause
                                     IconButton(
                                         onClick = {
-                                            if (isPlaying) {
-                                                exoPlayer.pause()
-                                            } else {
-                                                if (exoPlayer.playbackState == Player.STATE_ENDED) {
-                                                    autoPlayTriggered.value = false
-                                                    exoPlayer.seekTo(0L)
-                                                }
-                                                exoPlayer.play()
-                                            }
+                                            if (isPlaying) pausePlayback() else resumeOrPlay()
                                         },
                                         modifier = Modifier
                                             .size(56.dp)
@@ -946,6 +1098,23 @@ fun PlayerDialog(
                                     }
                                 }
                             }
+
+                            // Floating Skip Intro / Recap / Outro button (Portrait)
+                            SkipSegmentOverlay(
+                                segment = activeSkipSegment,
+                                compact = true,
+                                bottomPadding = if (showControls) 58.dp else 12.dp,
+                                endPadding = 12.dp,
+                                onSkip = { seg ->
+                                    val maxDur = exoPlayer.duration.coerceAtLeast(0L)
+                                    val target = if (maxDur > 0L) seg.endMs.coerceAtMost(maxDur) else seg.endMs
+                                    exoPlayer.seekTo(target)
+                                    currentPositionMs = target
+                                    resumePositionRef.longValue = target
+                                    latestOnSaveProgress?.invoke(target, maxDur)
+                                    aspectRatioToastMessage = seg.label.replace("Skip ", "Skipped ")
+                                }
+                            )
                         }
 
                         // Scrollable Content Under Video (Matching Image 1)
@@ -1243,7 +1412,7 @@ fun PlayerDialog(
                                                 when {
                                                     offset.x < size.width * 0.45f -> performDoubleTapSeek(-10)
                                                     offset.x > size.width * 0.55f -> performDoubleTapSeek(+10)
-                                                    else -> if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                                    else -> if (exoPlayer.isPlaying) pausePlayback() else resumeOrPlay()
                                                 }
                                             }
                                         }
@@ -1524,15 +1693,7 @@ fun PlayerDialog(
                                         // Clean White Play/Pause (|| / ▶) - matching Image 4
                                         IconButton(
                                             onClick = {
-                                                if (isPlaying) {
-                                                    exoPlayer.pause()
-                                                } else {
-                                                    if (exoPlayer.playbackState == Player.STATE_ENDED) {
-                                                        autoPlayTriggered.value = false
-                                                        exoPlayer.seekTo(0L)
-                                                    }
-                                                    exoPlayer.play()
-                                                }
+                                                if (isPlaying) pausePlayback() else resumeOrPlay()
                                             },
                                             modifier = Modifier.size(72.dp)
                                         ) {
@@ -1758,6 +1919,23 @@ fun PlayerDialog(
                                 }
                             }
                         }
+
+                        // Floating Skip Intro / Recap / Outro button (Landscape)
+                        SkipSegmentOverlay(
+                            segment = if (isControlsLocked) null else activeSkipSegment,
+                            compact = false,
+                            bottomPadding = if (showControls) 136.dp else 28.dp,
+                            endPadding = 36.dp,
+                            onSkip = { seg ->
+                                val maxDur = exoPlayer.duration.coerceAtLeast(0L)
+                                val target = if (maxDur > 0L) seg.endMs.coerceAtMost(maxDur) else seg.endMs
+                                exoPlayer.seekTo(target)
+                                currentPositionMs = target
+                                resumePositionRef.longValue = target
+                                latestOnSaveProgress?.invoke(target, maxDur)
+                                aspectRatioToastMessage = seg.label.replace("Skip ", "Skipped ")
+                            }
+                        )
                     }
                 }
             }
@@ -2428,59 +2606,95 @@ fun PlayerDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Anime4K & Line Sharpening",
+                            text = "Anime4K Shaders",
                             color = Color.White,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
                     }
 
-                    Text(
-                        text = "GPU Upscaler Mode",
-                        color = Color.White.copy(alpha = 0.7f),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    AnimeUpscalerMode.entries.forEach { mode ->
-                        val isSelected = animeUpscalerMode == mode
+                    animeEnhancementStatus?.let { status ->
                         Surface(
-                            onClick = {
-                                CatalogConfig.setAnimeUpscalerMode(mode)
-                                aspectRatioToastMessage = "Upscaler: ${mode.label}"
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
-                            border = if (isSelected) BorderStroke(1.dp, Color(0xFFA5B4FC)) else null,
+                            color = Color(0xFF333C57),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.5f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
+                            Text(
+                                text = "Active: ${status.detailLabel()}",
+                                color = Color(0xFFA5B4FC),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Anime4K 2x Upscaler",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "${animeUpscaleQuality.label} + anti-ringing Catmull-Rom",
+                                color = Color.White.copy(alpha = 0.65f),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Switch(
+                            checked = animeUpscaleEnabled,
+                            onCheckedChange = {
+                                CatalogConfig.setAnimeUpscaleEnabled(it)
+                                aspectRatioToastMessage = if (it) "Anime4K 2x (${animeUpscaleQuality.shortLabel}): ON" else "Anime4K 2x Upscaler: OFF"
+                            }
+                        )
+                    }
+
+                    if (animeUpscaleEnabled || lineSharpeningEnabled) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "CNN Quality Model",
+                                color = Color.White.copy(alpha = 0.75f),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
                             Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = mode.label,
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        text = mode.description,
-                                        color = Color.White.copy(alpha = 0.65f),
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                                if (isSelected) {
-                                    Icon(
-                                        Icons.Default.CheckCircle,
-                                        contentDescription = "Selected",
-                                        tint = Color(0xFFA5B4FC),
-                                        modifier = Modifier.size(20.dp)
+                                AnimeUpscaleQuality.entries.forEach { preset ->
+                                    val selected = animeUpscaleQuality == preset
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = {
+                                            CatalogConfig.setAnimeUpscaleQuality(preset)
+                                            aspectRatioToastMessage = "Anime4K Model: ${preset.label}"
+                                        },
+                                        label = { Text(preset.label) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = Color(0xFF333C57),
+                                            selectedLabelColor = Color(0xFFA5B4FC),
+                                            containerColor = Color(0xFF282830),
+                                            labelColor = Color.White
+                                        ),
+                                        shape = RoundedCornerShape(10.dp)
                                     )
                                 }
                             }
+                            Text(
+                                text = animeUpscaleQuality.description,
+                                color = Color.White.copy(alpha = 0.55f),
+                                style = MaterialTheme.typography.bodySmall
+                            )
                         }
                     }
 
@@ -2499,7 +2713,7 @@ fun PlayerDialog(
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                text = "Sobel dark-line thinning & crisp contours",
+                                text = "CNN restore, HQ darken/thin & halo-free ink sharpening",
                                 color = Color.White.copy(alpha = 0.65f),
                                 style = MaterialTheme.typography.bodySmall
                             )
@@ -2508,44 +2722,136 @@ fun PlayerDialog(
                             checked = lineSharpeningEnabled,
                             onCheckedChange = {
                                 CatalogConfig.setAnimeLineSharpening(it)
-                                aspectRatioToastMessage = if (it) "Anime Line Sharpening: ON" else "Anime Line Sharpening: OFF"
+                                aspectRatioToastMessage = if (it) "Anime Line Sharpening (${animeSharpenStrength.label}): ON" else "Anime Line Sharpening: OFF"
                             }
                         )
                     }
 
                     if (lineSharpeningEnabled) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Line Sharpening Intensity",
+                                color = Color.White.copy(alpha = 0.75f),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    text = "Sharpening Strength",
-                                    color = Color.White.copy(alpha = 0.75f),
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                                Text(
-                                    text = "${(lineSharpeningStrength * 100).toInt()}%",
-                                    color = Color(0xFFA5B4FC),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                AnimeSharpenStrength.entries.forEach { level ->
+                                    val selected = animeSharpenStrength == level
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = {
+                                            CatalogConfig.setAnimeSharpenStrength(level)
+                                            aspectRatioToastMessage = "Line Sharpening: ${level.label}"
+                                        },
+                                        label = { Text(level.label) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = Color(0xFF333C57),
+                                            selectedLabelColor = Color(0xFFA5B4FC),
+                                            containerColor = Color(0xFF282830),
+                                            labelColor = Color.White
+                                        ),
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                }
                             }
-                            Slider(
-                                value = lineSharpeningStrength,
-                                onValueChange = { CatalogConfig.setAnimeLineSharpeningStrength(it) },
-                                valueRange = 0.15f..1.0f,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = Color(0xFFA5B4FC),
-                                    activeTrackColor = Color(0xFFA5B4FC),
-                                    inactiveTrackColor = Color.White.copy(alpha = 0.25f)
-                                )
-                            )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
                 }
+            }
+        }
+    }
+}
+
+private class ExoVideoEffectsHolder {
+    @Volatile
+    var pipelineConfigured = false
+        private set
+    @Volatile
+    private var upscaleEnabled = false
+    @Volatile
+    private var lineSharpenEnabled = false
+    @Volatile
+    private var quality = AnimeUpscaleQuality.AUTO
+    @Volatile
+    private var sharpenStrength = AnimeSharpenStrength.BALANCED
+
+    fun update(
+        pipelineConfigured: Boolean,
+        upscaleEnabled: Boolean,
+        lineSharpenEnabled: Boolean,
+        quality: AnimeUpscaleQuality,
+        sharpenStrength: AnimeSharpenStrength,
+    ) {
+        this.pipelineConfigured = pipelineConfigured
+        this.upscaleEnabled = upscaleEnabled
+        this.lineSharpenEnabled = lineSharpenEnabled
+        this.quality = quality
+        this.sharpenStrength = sharpenStrength
+    }
+
+    fun matches(
+        upscaleEnabled: Boolean,
+        lineSharpenEnabled: Boolean,
+        quality: AnimeUpscaleQuality,
+        sharpenStrength: AnimeSharpenStrength,
+    ): Boolean =
+        this.upscaleEnabled == upscaleEnabled &&
+            this.lineSharpenEnabled == lineSharpenEnabled &&
+            this.quality == quality &&
+            this.sharpenStrength == sharpenStrength
+}
+
+@Composable
+private fun BoxScope.SkipSegmentOverlay(
+    segment: SkipSegment?,
+    compact: Boolean,
+    bottomPadding: androidx.compose.ui.unit.Dp,
+    endPadding: androidx.compose.ui.unit.Dp,
+    onSkip: (SkipSegment) -> Unit
+) {
+    AnimatedVisibility(
+        visible = segment != null,
+        enter = fadeIn() + slideInHorizontally(initialOffsetX = { it / 2 }),
+        exit = fadeOut() + slideOutHorizontally(targetOffsetX = { it / 2 }),
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .padding(end = endPadding, bottom = bottomPadding)
+            .zIndex(8f)
+    ) {
+        val current = segment ?: return@AnimatedVisibility
+        Surface(
+            onClick = { onSkip(current) },
+            color = Color(0xFF1A1D2B).copy(alpha = 0.90f),
+            shape = RoundedCornerShape(if (compact) 18.dp else 22.dp),
+            border = BorderStroke(1.2.dp, Color(0xFFA5B4FC)),
+            shadowElevation = 6.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(
+                    horizontal = if (compact) 12.dp else 18.dp,
+                    vertical = if (compact) 7.dp else 10.dp
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SkipNext,
+                    contentDescription = current.label,
+                    tint = Color(0xFFA5B4FC),
+                    modifier = Modifier.size(if (compact) 18.dp else 22.dp)
+                )
+                Text(
+                    text = current.label,
+                    color = Color.White,
+                    fontSize = if (compact) 12.sp else 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }

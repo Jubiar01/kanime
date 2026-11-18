@@ -1,8 +1,10 @@
 package com.kanime.app.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -14,9 +16,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.kanime.app.data.api.AnimeUpscalerMode
 import com.kanime.app.data.api.CatalogConfig
 import com.kanime.app.data.plugin.PluginManager
+import com.kanime.app.ui.player.anime.AnimeSharpenStrength
+import com.kanime.app.ui.player.anime.AnimeUpscaleQuality
 import com.kanime.app.ui.viewmodel.AnimeUiState
 import com.kanime.app.ui.viewmodel.AnimeViewModel
 
@@ -29,9 +32,10 @@ fun SettingsScreen(
     val plugins by PluginManager.plugins.collectAsState()
     val tmdbApiKey by CatalogConfig.tmdbApiKeyFlow.collectAsState()
     val autoPlayNext by CatalogConfig.autoPlayNextFlow.collectAsState()
-    val animeUpscalerMode by CatalogConfig.animeUpscalerModeFlow.collectAsState()
+    val animeUpscaleEnabled by CatalogConfig.animeUpscaleEnabledFlow.collectAsState()
     val lineSharpeningEnabled by CatalogConfig.animeLineSharpeningFlow.collectAsState()
-    val lineSharpeningStrength by CatalogConfig.animeLineSharpeningStrengthFlow.collectAsState()
+    val animeUpscaleQuality by CatalogConfig.animeUpscaleQualityFlow.collectAsState()
+    val animeSharpenStrength by CatalogConfig.animeSharpenStrengthFlow.collectAsState()
     val activePluginCount = plugins.count { it.isInstalled && it.isEnabled }
 
     LaunchedEffect(Unit) {
@@ -40,7 +44,6 @@ fun SettingsScreen(
 
     var showPluginsView by remember { mutableStateOf(false) }
     var showTmdbDialog by remember { mutableStateOf(false) }
-    var showUpscalerDialog by remember { mutableStateOf(false) }
     var tmdbInput by remember(tmdbApiKey) { mutableStateOf(tmdbApiKey) }
     var cacheClearedBanner by remember { mutableStateOf(false) }
 
@@ -315,7 +318,7 @@ fun SettingsScreen(
             }
         }
 
-        // Video Enhancement (Anime4K Upscaler & Line Sharpening)
+        // Video Enhancement (Anime4K 2x Upscaler & Line Sharpening)
         item {
             Text(
                 text = "Video Enhancement (Anime4K)",
@@ -332,7 +335,7 @@ fun SettingsScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // Anime4K Upscaler selector
+                    // Anime4K 2x CNN Upscaler
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -345,26 +348,59 @@ fun SettingsScreen(
                             Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Anime4K GPU Upscaler", fontWeight = FontWeight.SemiBold)
+                                Text("Anime4K 2x Upscaler", fontWeight = FontWeight.SemiBold)
                                 Text(
-                                    text = animeUpscalerMode.label,
+                                    text = if (animeUpscaleEnabled) {
+                                        "Active — ${animeUpscaleQuality.label} + Catmull-Rom supersampling"
+                                    } else {
+                                        "Real-time 2x CNN GPU upscaler with anti-ringing"
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        FilledTonalButton(
-                            onClick = { showUpscalerDialog = true },
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Mode")
+                        Switch(
+                            checked = animeUpscaleEnabled,
+                            onCheckedChange = { viewModel.setAnimeUpscaleEnabled(it) }
+                        )
+                    }
+
+                    // Quality preset chips (applies to Upscaler & CNN Restore model)
+                    if (animeUpscaleEnabled || lineSharpeningEnabled) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "CNN Quality Model",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                AnimeUpscaleQuality.entries.forEach { preset ->
+                                    FilterChip(
+                                        selected = animeUpscaleQuality == preset,
+                                        onClick = { viewModel.setAnimeUpscaleQuality(preset) },
+                                        label = { Text(preset.label) }
+                                    )
+                                }
+                            }
+                            Text(
+                                text = animeUpscaleQuality.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 
-                    // Anime Line Sharpening switch
+                    // Anime Line Sharpening (Clamp + Restore CNN + Darken HQ + Thin HQ + Adaptive Line Sharpen)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -380,9 +416,9 @@ fun SettingsScreen(
                                 Text("Anime Line Sharpening", fontWeight = FontWeight.SemiBold)
                                 Text(
                                     text = if (lineSharpeningEnabled) {
-                                        "Sobel dark-line thinning & contour crispness (${(lineSharpeningStrength * 100).toInt()}%)"
+                                        "Active — ${animeSharpenStrength.label} edge-aware ink sharpening + HQ restore"
                                     } else {
-                                        "Crisp blurry anime ink lines without ringing artifacts"
+                                        "Restores & sharpens anime ink lines without white halos"
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -396,31 +432,26 @@ fun SettingsScreen(
                         )
                     }
 
-                    // Line sharpening strength slider when enabled
                     if (lineSharpeningEnabled) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Line Sharpening Intensity",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Medium
+                            )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    text = "Line Sharpening Strength",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = "${(lineSharpeningStrength * 100).toInt()}%",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                AnimeSharpenStrength.entries.forEach { level ->
+                                    FilterChip(
+                                        selected = animeSharpenStrength == level,
+                                        onClick = { viewModel.setAnimeSharpenStrength(level) },
+                                        label = { Text(level.label) }
+                                    )
+                                }
                             }
-                            Slider(
-                                value = lineSharpeningStrength,
-                                onValueChange = { viewModel.setAnimeLineSharpeningStrength(it) },
-                                valueRange = 0.15f..1.0f,
-                                modifier = Modifier.fillMaxWidth()
-                            )
                         }
                     }
                 }
@@ -447,7 +478,7 @@ fun SettingsScreen(
                     SpecRow(icon = Icons.Default.Info, title = "Application", value = "KAnime v1.0.0")
                     SpecRow(icon = Icons.Default.CloudSync, title = "Metadata Engine", value = "MAL Direct + AniList")
                     SpecRow(icon = Icons.Default.Image, title = "Art & Stills", value = "TMDB → Kitsu → AniList")
-                    SpecRow(icon = Icons.Default.Speed, title = "Playback", value = "Adaptive Multi-Bitrate")
+                    SpecRow(icon = Icons.Default.AutoAwesome, title = "Video Shaders", value = "Anime4K v4 (GLES 3.0)")
                 }
             }
         }
@@ -484,63 +515,6 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { showTmdbDialog = false }) {
                     Text("Cancel")
-                }
-            }
-        )
-    }
-
-    if (showUpscalerDialog) {
-        AlertDialog(
-            onDismissRequest = { showUpscalerDialog = false },
-            title = { Text("Anime4K GPU Upscaler") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AnimeUpscalerMode.entries.forEach { mode ->
-                        Surface(
-                            onClick = {
-                                viewModel.setAnimeUpscalerMode(mode)
-                                showUpscalerDialog = false
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (animeUpscalerMode == mode) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
-                            ) {
-                                RadioButton(
-                                    selected = animeUpscalerMode == mode,
-                                    onClick = {
-                                        viewModel.setAnimeUpscalerMode(mode)
-                                        showUpscalerDialog = false
-                                    }
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = mode.label,
-                                        fontWeight = FontWeight.SemiBold,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Text(
-                                        text = mode.description,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showUpscalerDialog = false }) {
-                    Text("Close")
                 }
             }
         )

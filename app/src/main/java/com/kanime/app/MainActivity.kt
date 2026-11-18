@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kanime.app.data.api.CatalogConfig
+import com.kanime.app.data.api.WatchHistoryStore
 import com.kanime.app.data.plugin.PluginManager
 import com.kanime.app.ui.screens.*
 import com.kanime.app.ui.theme.KAnimeTheme
@@ -54,8 +55,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Initialize catalog config (TMDB API key prefs, etc.) & plugin status sync
+        // Initialize catalog config, persisted watchlist/history & plugin status sync
         CatalogConfig.init(applicationContext)
+        WatchHistoryStore.init(applicationContext)
         PluginManager.checkPluginStatus(applicationContext)
 
         // Listen for real-time APK install / uninstall / update events
@@ -120,8 +122,10 @@ fun KAnimeApp(
         PlayerDialog(
             anime = anime,
             episode = currentEp,
+            initialPositionMs = uiState.playingInitialPositionMs,
             autoPlayNext = autoPlayNext,
             onToggleAutoPlayNext = { viewModel.setAutoPlayNext(it) },
+            onSaveProgress = { posMs, durMs -> viewModel.saveWatchProgress(anime, currentEp, posMs, durMs) },
             onDismiss = { viewModel.closePlayer() },
             onNextEpisode = if (nextEp != null) {
                 { viewModel.playEpisode(anime, nextEp) }

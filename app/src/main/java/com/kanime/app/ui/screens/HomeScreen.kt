@@ -5,12 +5,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.kanime.app.data.model.Anime
 import com.kanime.app.data.repository.AnimeRepository
 import com.kanime.app.ui.components.AnimeCard
-import com.kanime.app.ui.components.HeroBanner
+import com.kanime.app.ui.components.HeroBannerCarousel
 import com.kanime.app.ui.components.SectionHeader
 import com.kanime.app.ui.viewmodel.AnimeUiState
 import com.kanime.app.ui.viewmodel.AnimeViewModel
@@ -24,22 +25,24 @@ fun HomeScreen(
     val trending = uiState.trendingAnime
     val topAiring = uiState.topAiringAnime
     val seasonal = uiState.seasonalAnime
-    val featured = trending.firstOrNull() ?: viewModel.allAnime.firstOrNull() ?: AnimeRepository.sampleAnimes.first()
+    val topSeasonalBanner = remember(seasonal, trending) {
+        val base = if (seasonal.isNotEmpty()) seasonal else trending
+        base.take(10).ifEmpty { AnimeRepository.sampleAnimes.take(10) }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 90.dp)
+        contentPadding = PaddingValues(top = 12.dp, bottom = 90.dp)
     ) {
-        // Hero Featured Banner
-        item {
-            Box(modifier = Modifier.padding(16.dp)) {
-                HeroBanner(
-                    anime = featured,
-                    isInWatchlist = uiState.watchlistIds.contains(featured.id),
-                    onWatchClick = { viewModel.openAnime(featured) },
-                    onToggleWatchlist = { viewModel.toggleWatchlist(featured.id) }
-                )
-            }
+        // Top 10 Popular This Season Hero Carousel
+        item(key = "hero_seasonal_carousel") {
+            HeroBannerCarousel(
+                animes = topSeasonalBanner,
+                watchlistIds = uiState.watchlistIds,
+                onWatchClick = { anime -> viewModel.openAnime(anime) },
+                onToggleWatchlist = { animeId -> viewModel.toggleWatchlist(animeId) }
+            )
+            Spacer(modifier = Modifier.height(14.dp))
         }
 
         // Trending Now Section
