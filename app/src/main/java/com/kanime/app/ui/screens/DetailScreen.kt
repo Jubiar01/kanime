@@ -96,13 +96,14 @@ fun DetailScreen(
                 anime.japaneseTitle
             ).map { it.trim() }.filter { it.isNotBlank() }.distinct()
 
+            val authority = activePlugin.providerAuthority
             var slug: String? = null
             for (candidate in titleCandidates) {
-                slug = PluginBridge.findSlug(context, candidate)
+                slug = PluginBridge.findSlug(context, candidate, authority = authority)
                 if (slug != null) break
             }
             if (slug != null) {
-                val list = PluginBridge.getEpisodes(context, slug)
+                val list = PluginBridge.getEpisodes(context, slug, authority = authority)
                 if (list.isNotEmpty()) {
                     anikotoEpisodes = list.map { anikotoEp ->
                         Episode(
@@ -111,7 +112,7 @@ fun DetailScreen(
                             title = anikotoEp.title,
                             duration = anime.duration,
                             thumbnail = anime.bannerUrl.ifBlank { anime.coverUrl },
-                            description = "Streamed via KAnikoto Plugin"
+                            description = "Streamed via ${activePlugin.name}"
                         )
                     }
                 }

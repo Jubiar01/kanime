@@ -3,6 +3,13 @@ package com.kanime.app.data.api
 import android.content.Context
 import android.content.SharedPreferences
 import com.kanime.app.BuildConfig
+import com.kanime.app.ui.player.CaptionBackground
+import com.kanime.app.ui.player.CaptionColor
+import com.kanime.app.ui.player.CaptionEdgeStyle
+import com.kanime.app.ui.player.CaptionFont
+import com.kanime.app.ui.player.CaptionPosition
+import com.kanime.app.ui.player.CaptionStyleSettings
+import com.kanime.app.ui.player.CaptionTextSize
 import com.kanime.app.ui.player.anime.AnimeSharpenStrength
 import com.kanime.app.ui.player.anime.AnimeUpscaleQuality
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +30,14 @@ object CatalogConfig {
     private const val KEY_LINE_SHARPENING = "anime_line_sharpening"
     private const val KEY_ANIME4K_QUALITY = "anime4k_upscale_quality"
     private const val KEY_SHARPEN_STRENGTH = "anime_sharpen_strength"
+    private const val KEY_SHADERS_DEFAULT_OFF_MIGRATED = "anime_shaders_default_off_v1"
+    private const val KEY_CAPTION_FONT = "caption_font"
+    private const val KEY_CAPTION_SIZE = "caption_size"
+    private const val KEY_CAPTION_COLOR = "caption_color"
+    private const val KEY_CAPTION_EDGE = "caption_edge"
+    private const val KEY_CAPTION_BG = "caption_bg"
+    private const val KEY_CAPTION_POSITION = "caption_position"
+    private const val KEY_CAPTION_BOLD = "caption_bold"
 
     const val DESKTOP_USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -68,6 +83,12 @@ object CatalogConfig {
     val animeSharpenStrength: AnimeSharpenStrength
         get() = _animeSharpenStrength.value
 
+    private val _captionStyle = MutableStateFlow(CaptionStyleSettings())
+    val captionStyleFlow: StateFlow<CaptionStyleSettings> = _captionStyle.asStateFlow()
+
+    val captionStyle: CaptionStyleSettings
+        get() = _captionStyle.value
+
     val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(12, TimeUnit.SECONDS)
@@ -87,11 +108,45 @@ object CatalogConfig {
         } else if (BuildConfig.TMDB_API_KEY.isNotBlank()) {
             _tmdbApiKey.value = BuildConfig.TMDB_API_KEY.trim()
         }
+        if (!sp.getBoolean(KEY_SHADERS_DEFAULT_OFF_MIGRATED, false)) {
+            sp.edit()
+                .putBoolean(KEY_ANIME4K_UPSCALE, false)
+                .putBoolean(KEY_LINE_SHARPENING, false)
+                .putBoolean(KEY_SHADERS_DEFAULT_OFF_MIGRATED, true)
+                .apply()
+        }
         _autoPlayNext.value = sp.getBoolean(KEY_AUTO_PLAY_NEXT, true)
         _animeUpscaleEnabled.value = sp.getBoolean(KEY_ANIME4K_UPSCALE, false)
         _animeLineSharpening.value = sp.getBoolean(KEY_LINE_SHARPENING, false)
         _animeUpscaleQuality.value = AnimeUpscaleQuality.fromId(sp.getString(KEY_ANIME4K_QUALITY, null))
         _animeSharpenStrength.value = AnimeSharpenStrength.fromId(sp.getString(KEY_SHARPEN_STRENGTH, null))
+        _captionStyle.value = CaptionStyleSettings(
+            font = CaptionFont.fromId(sp.getString(KEY_CAPTION_FONT, null)),
+            textSize = CaptionTextSize.fromId(sp.getString(KEY_CAPTION_SIZE, null)),
+            textColor = CaptionColor.fromId(sp.getString(KEY_CAPTION_COLOR, null)),
+            edgeStyle = CaptionEdgeStyle.fromId(sp.getString(KEY_CAPTION_EDGE, null)),
+            background = CaptionBackground.fromId(sp.getString(KEY_CAPTION_BG, null)),
+            position = CaptionPosition.fromId(sp.getString(KEY_CAPTION_POSITION, null)),
+            isBold = sp.getBoolean(KEY_CAPTION_BOLD, true)
+        )
+    }
+
+    fun updateCaptionStyle(transform: (CaptionStyleSettings) -> CaptionStyleSettings) {
+        val updated = transform(_captionStyle.value)
+        _captionStyle.value = updated
+        prefs?.edit()
+            ?.putString(KEY_CAPTION_FONT, updated.font.id)
+            ?.putString(KEY_CAPTION_SIZE, updated.textSize.id)
+            ?.putString(KEY_CAPTION_COLOR, updated.textColor.id)
+            ?.putString(KEY_CAPTION_EDGE, updated.edgeStyle.id)
+            ?.putString(KEY_CAPTION_BG, updated.background.id)
+            ?.putString(KEY_CAPTION_POSITION, updated.position.id)
+            ?.putBoolean(KEY_CAPTION_BOLD, updated.isBold)
+            ?.apply()
+    }
+
+    fun resetCaptionStyle() {
+        updateCaptionStyle { CaptionStyleSettings() }
     }
 
     fun setAutoPlayNext(enabled: Boolean) {

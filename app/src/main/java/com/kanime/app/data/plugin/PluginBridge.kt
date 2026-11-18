@@ -43,6 +43,7 @@ object PluginBridge {
     const val KANIKOTO_PACKAGE = "com.kanime.plugin.kanikoto"
 
     fun isPluginInstalled(context: Context, packageName: String = KANIKOTO_PACKAGE): Boolean {
+        if (packageName.isBlank()) return false
         return try {
             context.packageManager.getPackageInfo(packageName, 0)
             true
@@ -52,6 +53,7 @@ object PluginBridge {
     }
 
     private fun callProvider(context: Context, authority: String, method: String, arg: String? = null): Bundle? {
+        if (authority.isBlank()) return null
         return try {
             val uri = Uri.parse("content://$authority")
             context.contentResolver.call(uri, method, arg, null)

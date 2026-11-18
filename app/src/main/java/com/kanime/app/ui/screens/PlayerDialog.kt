@@ -58,8 +58,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -73,8 +76,11 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import java.util.Locale
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -92,11 +98,19 @@ import com.kanime.app.data.plugin.PluginBridge
 import com.kanime.app.data.plugin.PluginManager
 import com.kanime.app.data.plugin.PluginServer
 import com.kanime.app.data.plugin.PluginStream
+import com.kanime.app.ui.player.CaptionBackground
+import com.kanime.app.ui.player.CaptionColor
+import com.kanime.app.ui.player.CaptionEdgeStyle
+import com.kanime.app.ui.player.CaptionFont
+import com.kanime.app.ui.player.CaptionPosition
+import com.kanime.app.ui.player.CaptionTextSize
+import com.kanime.app.ui.player.applyCaptionStyle
 import com.kanime.app.ui.player.anime.AnimeEnhancementStatus
 import com.kanime.app.ui.player.anime.AnimeShaderStatusTracker
 import com.kanime.app.ui.player.anime.AnimeShaders
 import com.kanime.app.ui.player.anime.AnimeSharpenStrength
 import com.kanime.app.ui.player.anime.AnimeUpscaleQuality
+import com.kanime.app.ui.theme.GeistFontFamily
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -142,19 +156,37 @@ fun PlayerDialog(
     var resolutionState by remember { mutableStateOf<StreamResolutionState>(StreamResolutionState.Loading("Resolving stream via KAnikoto plugin...")) }
     var availableServers by remember { mutableStateOf<List<PluginServer>>(emptyList()) }
     var selectedServer by remember { mutableStateOf<PluginServer?>(null) }
-    var selectedAudioType by remember { mutableStateOf("sub") } // "sub" or "dub"
+    var selectedAudioType by remember { mutableStateOf("sub") } // e.g. "sub", "dub", "raw", "id"
+    var embeddedAudioTracks by remember { mutableStateOf<List<EmbeddedAudioTrack>>(emptyList()) }
+    var selectedEmbeddedAudioKey by remember { mutableStateOf<String?>(null) }
+    var pendingAudioTrackSelection by remember { mutableStateOf<EmbeddedAudioTrack?>(null) }
+    var pendingAudioResumePosMs by remember(anime.id, episode.episodeNumber) { mutableLongStateOf(0L) }
 
     // Bottom sheets state
     var showStreamsSheet by remember { mutableStateOf(false) }
     var showSourceSheet by remember { mutableStateOf(false) }
     var showSpeedSheet by remember { mutableStateOf(false) }
     var showSubtitlesSheet by remember { mutableStateOf(false) }
+    var showAudioSheet by remember { mutableStateOf(false) }
     var showEnhanceSheet by remember { mutableStateOf(false) }
+
+    val activeAudioShortLabel = remember(embeddedAudioTracks, selectedEmbeddedAudioKey, selectedAudioType) {
+        val activeEmbedded = embeddedAudioTracks.firstOrNull { it.key == selectedEmbeddedAudioKey }
+            ?: embeddedAudioTracks.firstOrNull { it.isSelected }
+        activeEmbedded?.shortLanguage ?: audioTypeShortLanguage(selectedAudioType)
+    }
     var subtitlesEnabled by remember { mutableStateOf(true) }
     var selectedSubtitleTrack by remember { mutableStateOf("English [CC]") }
+    var subtitleSheetTab by remember { mutableIntStateOf(0) } // 0 = Tracks, 1 = Style
+    val captionStyle by CatalogConfig.captionStyleFlow.collectAsState()
     var autoSelectStream by remember { mutableStateOf(true) }
     var extensionSearchQuery by remember { mutableStateOf("") }
-    var selectedFramework by remember { mutableStateOf("All Sources") }
+    var sourceFilterTab by remember { mutableStateOf("Installed") } // "Installed" or "All Plugins"
+
+    val currentActivePlugin = remember(availablePlugins, activeSourceId) {
+        availablePlugins.firstOrNull { it.id == activeSourceId } ?: availablePlugins.firstOrNull()
+    }
+    val activePluginLabel = currentActivePlugin?.name ?: "No Plugin"
 
     // Persisted Anime4K 2x Upscaler & Line Sharpening settings
     val animeUpscaleEnabled by CatalogConfig.animeUpscaleEnabledFlow.collectAsState()
@@ -260,22 +292,25 @@ fun PlayerDialog(
     }
 
     // Auto-hide controls timer (5 seconds)
-    LaunchedEffect(showControls, isPlaying, isControlsLocked, showStreamsSheet, showSourceSheet, showSpeedSheet, showSubtitlesSheet, showEnhanceSheet) {
-        if (showControls && isPlaying && !isControlsLocked && !showStreamsSheet && !showSourceSheet && !showSpeedSheet && !showSubtitlesSheet && !showEnhanceSheet) {
+    LaunchedEffect(showControls, isPlaying, isControlsLocked, showStreamsSheet, showSourceSheet, showSpeedSheet, showSubtitlesSheet, showAudioSheet, showEnhanceSheet) {
+        if (showControls && isPlaying && !isControlsLocked && !showStreamsSheet && !showSourceSheet && !showSpeedSheet && !showSubtitlesSheet && !showAudioSheet && !showEnhanceSheet) {
             delay(5000)
             showControls = false
         }
     }
 
-    // Resolve stream via KAnikoto plugin through PluginBridge
+    // Resolve stream via the active installed plugin through PluginBridge
     fun resolveStream(serverToUse: PluginServer? = null) {
         coroutineScope.launch {
             PluginManager.checkPluginStatus(context)
             val activePlugin = PluginManager.plugins.value.firstOrNull { it.id == activeSourceId }
+                ?: PluginManager.plugins.value.firstOrNull { it.isInstalled && it.isEnabled }
                 ?: PluginManager.plugins.value.firstOrNull()
 
             if (activePlugin == null || !activePlugin.isInstalled) {
-                resolutionState = StreamResolutionState.Error("KAnikoto plugin is not installed. Go to Settings > Video Source Plugins to download and install it.")
+                resolutionState = StreamResolutionState.Error(
+                    "${activePlugin?.name ?: "Source plugin"} is not installed. Go to Settings > Video Source Plugins to download and install it."
+                )
                 return@launch
             }
             if (!activePlugin.isEnabled) {
@@ -283,6 +318,7 @@ fun PlayerDialog(
                 return@launch
             }
 
+            val authority = activePlugin.providerAuthority
             resolutionState = StreamResolutionState.Loading("Resolving anime via ${activePlugin.name}...")
             try {
                 val titleCandidates = listOfNotNull(
@@ -293,28 +329,28 @@ fun PlayerDialog(
                 ).map { it.trim() }.filter { it.isNotBlank() }.distinct()
                 var slug: String? = null
                 for (candidate in titleCandidates) {
-                    slug = PluginBridge.findSlug(context, candidate)
+                    slug = PluginBridge.findSlug(context, candidate, authority = authority)
                     if (slug != null) break
                 }
 
                 if (slug == null) {
-                    resolutionState = StreamResolutionState.Error("Anime '${anime.title}' was not found in KAnikoto catalog.")
+                    resolutionState = StreamResolutionState.Error("Anime '${anime.title}' was not found on ${activePlugin.name}.")
                     return@launch
                 }
 
                 resolutionState = StreamResolutionState.Loading("Fetching episode nodes...")
-                val episodes = PluginBridge.getEpisodes(context, slug)
+                val episodes = PluginBridge.getEpisodes(context, slug, authority = authority)
                 val targetEp = episodes.firstOrNull { it.num == episode.episodeNumber.toDouble() }
                     ?: episodes.firstOrNull { Math.abs(it.num - episode.episodeNumber) < 0.1 }
                     ?: episodes.firstOrNull()
 
                 if (targetEp == null) {
-                    resolutionState = StreamResolutionState.Error("Episode ${episode.episodeNumber} not found on source.")
+                    resolutionState = StreamResolutionState.Error("Episode ${episode.episodeNumber} not found on ${activePlugin.name}.")
                     return@launch
                 }
 
                 resolutionState = StreamResolutionState.Loading("Loading server nodes...")
-                val servers = PluginBridge.getServers(context, targetEp.id)
+                val servers = PluginBridge.getServers(context, targetEp.id, authority = authority)
                 availableServers = servers
 
                 val sortedServers = servers.sortedWith(
@@ -333,7 +369,7 @@ fun PlayerDialog(
 
                 for (srv in serversToTry) {
                     resolutionState = StreamResolutionState.Loading("Connecting to ${srv.name} (${srv.type.uppercase()})...")
-                    val stream = PluginBridge.getStream(context, srv.sourceId)
+                    val stream = PluginBridge.getStream(context, srv.sourceId, authority = authority)
                     if (stream != null && !stream.m3u8.isNullOrBlank()) {
                         foundStream = stream
                         foundServer = srv
@@ -343,7 +379,7 @@ fun PlayerDialog(
 
                 if (foundStream == null) {
                     for (srv in serversToTry) {
-                        val stream = PluginBridge.getStream(context, srv.sourceId)
+                        val stream = PluginBridge.getStream(context, srv.sourceId, authority = authority)
                         if (stream != null) {
                             foundStream = stream
                             foundServer = srv
@@ -356,15 +392,15 @@ fun PlayerDialog(
                     selectedServer = foundServer
                     resolutionState = StreamResolutionState.Success(foundStream)
                 } else {
-                    resolutionState = StreamResolutionState.Error("Unable to connect to streaming servers. Please verify plugin is installed and active.")
+                    resolutionState = StreamResolutionState.Error("Unable to connect to streaming servers on ${activePlugin.name}. Please verify plugin is installed and active.")
                 }
             } catch (e: Exception) {
-                resolutionState = StreamResolutionState.Error("KAnikoto stream extraction error: ${e.message}")
+                resolutionState = StreamResolutionState.Error("${activePlugin.name} stream extraction error: ${e.message}")
             }
         }
     }
 
-    LaunchedEffect(anime.id, episode.episodeNumber, selectedAudioType) {
+    LaunchedEffect(anime.id, episode.episodeNumber, selectedAudioType, activeSourceId) {
         resolveStream()
     }
 
@@ -478,7 +514,7 @@ fun PlayerDialog(
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
-                            text = "KAnikoto Android Plugin",
+                            text = activePluginLabel,
                             color = Color(0xFFA5B4FC),
                             style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -520,7 +556,7 @@ fun PlayerDialog(
                         FilledTonalButton(onClick = { resolveStream() }) {
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Retry KAnikoto")
+                            Text("Retry")
                         }
                         if (availableServers.isNotEmpty()) {
                             Button(onClick = { showStreamsSheet = true }) {
@@ -539,9 +575,16 @@ fun PlayerDialog(
                 val lifecycleOwner = LocalLifecycleOwner.current
                 val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
-                // Remember playback position across clean Anime4K ExoPlayer rebuilds and resume from Watch History
+                // Remember playback position across clean Anime4K ExoPlayer rebuilds, audio switches, and Watch History resume
                 val resumePositionRef = remember(streamUrl, anime.id, episode.episodeNumber) {
-                    mutableLongStateOf(initialPositionMs.coerceAtLeast(0L))
+                    val startMs = if (pendingAudioResumePosMs > 0L) {
+                        val saved = pendingAudioResumePosMs
+                        pendingAudioResumePosMs = 0L
+                        saved
+                    } else {
+                        initialPositionMs.coerceAtLeast(0L)
+                    }
+                    mutableLongStateOf(startMs)
                 }
                 val resumePlayWhenReadyRef = remember(streamUrl) { mutableStateOf(true) }
                 LaunchedEffect(streamUrl, anime.id, episode.episodeNumber) {
@@ -663,6 +706,15 @@ fun PlayerDialog(
                             addListener(object : Player.Listener {
                                 override fun onIsPlayingChanged(playing: Boolean) {
                                     isPlaying = playing
+                                }
+
+                                override fun onTracksChanged(tracks: Tracks) {
+                                    val parsed = extractEmbeddedAudioTracks(tracks, selectedAudioType)
+                                    embeddedAudioTracks = parsed
+                                    val active = parsed.firstOrNull { it.isSelected }
+                                    if (active != null) {
+                                        selectedEmbeddedAudioKey = active.key
+                                    }
                                 }
 
                                 override fun onPlayerError(error: PlaybackException) {
@@ -787,6 +839,26 @@ fun PlayerDialog(
                     exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed)
                 }
 
+                // Sync initial embedded audio tracks when ExoPlayer is ready & apply manual audio track selections
+                LaunchedEffect(exoPlayer) {
+                    val parsed = extractEmbeddedAudioTracks(exoPlayer.currentTracks, selectedAudioType)
+                    if (parsed.isNotEmpty()) {
+                        embeddedAudioTracks = parsed
+                        parsed.firstOrNull { it.isSelected }?.let { selectedEmbeddedAudioKey = it.key }
+                    }
+                }
+
+                LaunchedEffect(exoPlayer, pendingAudioTrackSelection) {
+                    val target = pendingAudioTrackSelection ?: return@LaunchedEffect
+                    val builder = exoPlayer.trackSelectionParameters.buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                        .setOverrideForType(TrackSelectionOverride(target.trackGroup, target.trackIndex))
+                    exoPlayer.trackSelectionParameters = builder.build()
+                    selectedEmbeddedAudioKey = target.key
+                    embeddedAudioTracks = embeddedAudioTracks.map { it.copy(isSelected = it.key == target.key) }
+                    pendingAudioTrackSelection = null
+                }
+
                 // Subtitle track selection
                 LaunchedEffect(exoPlayer, subtitlesEnabled, selectedSubtitleTrack) {
                     val builder = exoPlayer.trackSelectionParameters.buildUpon()
@@ -860,17 +932,17 @@ fun PlayerDialog(
                         this.player = exoPlayer
                         useController = false
                         this.resizeMode = resizeMode
-                        subtitleView?.apply {
-                            setFractionalTextSize(0.053f)
-                            setUserDefaultStyle()
-                            setUserDefaultTextSize()
-                            setApplyEmbeddedStyles(true)
-                        }
+                        applyCaptionStyle(context, subtitleView, captionStyle)
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
                     }
+                }
+
+                // Live-apply user caption customizations (font, size, color, edge, background, position)
+                LaunchedEffect(playerView, captionStyle) {
+                    applyCaptionStyle(context, playerView.subtitleView, captionStyle)
                 }
 
                 DisposableEffect(exoPlayer) {
@@ -1179,10 +1251,10 @@ fun PlayerDialog(
                                 }
                                 ActionPill(
                                     icon = Icons.Default.Headphones,
-                                    label = "Audio",
-                                    isActive = selectedAudioType == "sub"
+                                    label = "Audio: $activeAudioShortLabel",
+                                    isActive = showAudioSheet
                                 ) {
-                                    selectedAudioType = if (selectedAudioType == "sub") "dub" else "sub"
+                                    showAudioSheet = true
                                 }
                                 ActionPill(
                                     icon = Icons.Default.FolderOpen,
@@ -1210,7 +1282,7 @@ fun PlayerDialog(
                             ) {
                                 ActionPill(
                                     icon = Icons.Default.Extension,
-                                    label = "Source: KAnikoto",
+                                    label = "Source: $activePluginLabel",
                                     isActive = showSourceSheet
                                 ) {
                                     showSourceSheet = true
@@ -1842,22 +1914,20 @@ fun PlayerDialog(
                                                     }
                                                 }
 
-                                                // Icon 4: Audio track [🎵] (With active container pill in Image 6)
+                                                // Icon 4: Audio track selector [🎵]
                                                 Box(
                                                     modifier = Modifier
                                                         .clip(RoundedCornerShape(8.dp))
-                                                        .background(if (selectedAudioType == "sub") Color(0xFFA5B4FC).copy(alpha = 0.25f) else Color.Transparent)
+                                                        .background(if (showAudioSheet) Color(0xFFA5B4FC).copy(alpha = 0.25f) else Color.Transparent)
                                                 ) {
                                                     IconButton(
-                                                        onClick = {
-                                                            selectedAudioType = if (selectedAudioType == "sub") "dub" else "sub"
-                                                        },
+                                                        onClick = { showAudioSheet = true },
                                                         modifier = Modifier.size(44.dp)
                                                     ) {
                                                         Icon(
                                                             Icons.Default.MusicNote,
-                                                            contentDescription = "Audio Sub/Dub",
-                                                            tint = if (selectedAudioType == "sub") Color(0xFFA5B4FC) else Color.White,
+                                                            contentDescription = "Audio Track ($activeAudioShortLabel)",
+                                                            tint = if (showAudioSheet) Color(0xFFA5B4FC) else Color.White,
                                                             modifier = Modifier.size(22.dp)
                                                         )
                                                     }
@@ -1981,7 +2051,7 @@ fun PlayerDialog(
         // ══════════════════════════════════════════════════════════════
         // BOTTOM SHEETS BACKDROP
         // ══════════════════════════════════════════════════════════════
-        if (showStreamsSheet || showSourceSheet || showSpeedSheet || showSubtitlesSheet || showEnhanceSheet) {
+        if (showStreamsSheet || showSourceSheet || showSpeedSheet || showSubtitlesSheet || showAudioSheet || showEnhanceSheet) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1992,6 +2062,7 @@ fun PlayerDialog(
                         showSourceSheet = false
                         showSpeedSheet = false
                         showSubtitlesSheet = false
+                        showAudioSheet = false
                         showEnhanceSheet = false
                     }
             )
@@ -2117,6 +2188,9 @@ fun PlayerDialog(
 
                                 Surface(
                                     onClick = {
+                                        pendingAudioResumePosMs = currentPositionMs.coerceAtLeast(0L)
+                                        selectedEmbeddedAudioKey = null
+                                        embeddedAudioTracks = emptyList()
                                         selectedServer = srv
                                         showStreamsSheet = false
                                         resolveStream(srv)
@@ -2164,7 +2238,7 @@ fun PlayerDialog(
         }
 
         // ══════════════════════════════════════════════════════════════
-        // SUBTITLES BOTTOM SHEET
+        // SUBTITLES & CAPTIONS BOTTOM SHEET (TRACKS + LIVE STYLE EDITOR)
         // ══════════════════════════════════════════════════════════════
         AnimatedVisibility(
             visible = showSubtitlesSheet,
@@ -2178,7 +2252,7 @@ fun PlayerDialog(
                 modifier = Modifier
                     .widthIn(max = 680.dp)
                     .fillMaxWidth()
-                    .fillMaxHeight(if (isLandscape) 0.82f else 0.55f),
+                    .fillMaxHeight(if (isLandscape) 0.88f else 0.72f),
                 color = Color(0xFF1E1E24),
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 shadowElevation = 16.dp
@@ -2196,73 +2270,682 @@ fun PlayerDialog(
                             .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
                     )
 
-                    Text(
-                        text = "Subtitles & Captions",
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Enable Subtitles",
-                                color = Color.White,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Subtitles,
+                                contentDescription = null,
+                                tint = Color(0xFFA5B4FC),
+                                modifier = Modifier.size(22.dp)
                             )
                             Text(
-                                text = if (subtitlesEnabled) "Captions are currently visible" else "Captions are turned off",
-                                color = Color.White.copy(alpha = 0.6f),
-                                style = MaterialTheme.typography.bodySmall
+                                text = "Subtitles & Captions",
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
                             )
                         }
-                        Switch(
-                            checked = subtitlesEnabled,
-                            onCheckedChange = { subtitlesEnabled = it },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFFA5B4FC)
-                            )
-                        )
-                    }
 
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    val subOptions = mutableListOf("English [CC]", "Off")
-                    if (resolutionState is StreamResolutionState.Success) {
-                        (resolutionState as StreamResolutionState.Success).stream.subtitles.forEach { sub ->
-                            if (!subOptions.contains(sub.lang)) {
-                                subOptions.add(0, sub.lang)
+                        if (subtitleSheetTab == 1) {
+                            TextButton(
+                                onClick = {
+                                    CatalogConfig.resetCaptionStyle()
+                                    aspectRatioToastMessage = "Caption style reset to default"
+                                },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "Reset",
+                                    color = Color(0xFFA5B4FC),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Segmented Tabs: Tracks | Customize Style
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF282830), RoundedCornerShape(12.dp))
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf("Tracks", "Customize Style").forEachIndexed { idx, tabLabel ->
+                            val selected = subtitleSheetTab == idx
+                            Surface(
+                                onClick = { subtitleSheetTab = idx },
+                                color = if (selected) Color(0xFF333C57) else Color.Transparent,
+                                shape = RoundedCornerShape(9.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = tabLabel,
+                                        color = if (selected) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.72f),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    if (subtitleSheetTab == 0) {
+                        // TAB 0: TRACKS
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Enable Subtitles",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = if (subtitlesEnabled) "Captions are currently visible" else "Captions are turned off",
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            Switch(
+                                checked = subtitlesEnabled,
+                                onCheckedChange = { subtitlesEnabled = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFFA5B4FC)
+                                )
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        val subOptions = mutableListOf("English [CC]", "Off")
+                        if (resolutionState is StreamResolutionState.Success) {
+                            (resolutionState as StreamResolutionState.Success).stream.subtitles
+                                .filter { sub ->
+                                    !sub.url.contains("thumbnails", ignoreCase = true) &&
+                                        !sub.lang.contains("thumbnail", ignoreCase = true) &&
+                                        !sub.lang.contains("unknown", ignoreCase = true)
+                                }
+                                .forEach { sub ->
+                                    if (!subOptions.contains(sub.lang)) {
+                                        subOptions.add(0, sub.lang)
+                                    }
+                                }
+                        }
+
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(bottom = 16.dp)
+                        ) {
+                            items(subOptions.distinct()) { opt ->
+                                val isSelected = (opt == "Off" && !subtitlesEnabled) ||
+                                    (opt != "Off" && subtitlesEnabled && selectedSubtitleTrack.equals(opt, ignoreCase = true))
+
+                                Surface(
+                                    onClick = {
+                                        if (opt == "Off") {
+                                            subtitlesEnabled = false
+                                        } else {
+                                            subtitlesEnabled = true
+                                            selectedSubtitleTrack = opt
+                                        }
+                                        showSubtitlesSheet = false
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
+                                    border = if (isSelected) BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.65f)) else null,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                Icons.Default.Subtitles,
+                                                contentDescription = null,
+                                                tint = if (isSelected) Color(0xFFA5B4FC) else Color.White,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text(
+                                                text = opt,
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        }
+
+                                        if (isSelected) {
+                                            Icon(
+                                                Icons.Default.CheckCircle,
+                                                contentDescription = "Selected",
+                                                tint = Color(0xFFA5B4FC),
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // TAB 1: CUSTOMIZE CAPTION STYLE (LIVE PREVIEW + CONTROLS)
+                        val previewFontFamily = when (captionStyle.font) {
+                            CaptionFont.GEIST -> GeistFontFamily
+                            CaptionFont.SANS_SERIF -> FontFamily.SansSerif
+                            CaptionFont.SERIF -> FontFamily.Serif
+                            CaptionFont.MONOSPACE -> FontFamily.Monospace
+                            CaptionFont.CASUAL -> FontFamily.Cursive
+                        }
+                        val previewShadow = when (captionStyle.edgeStyle) {
+                            CaptionEdgeStyle.OUTLINE -> Shadow(color = Color.Black, offset = Offset(0f, 0f), blurRadius = 6f)
+                            CaptionEdgeStyle.DROP_SHADOW -> Shadow(color = Color.Black, offset = Offset(3f, 3f), blurRadius = 5f)
+                            CaptionEdgeStyle.RAISED -> Shadow(color = Color.Black, offset = Offset(0f, 3f), blurRadius = 3f)
+                            CaptionEdgeStyle.NONE -> Shadow.None
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(bottom = 20.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            // Live Caption Preview Box
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(78.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(Color(0xFF15192B), Color(0xFF232842), Color(0xFF121521))
+                                        )
+                                    )
+                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                contentAlignment = when (captionStyle.position) {
+                                    CaptionPosition.LOW -> Alignment.BottomCenter
+                                    CaptionPosition.NORMAL -> Alignment.Center
+                                    CaptionPosition.HIGH -> Alignment.TopCenter
+                                }
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(captionStyle.background.argb))
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "This is how your anime captions look.",
+                                        color = Color(captionStyle.textColor.argb),
+                                        fontFamily = previewFontFamily,
+                                        fontWeight = if (captionStyle.isBold) FontWeight.Bold else FontWeight.Normal,
+                                        fontSize = captionStyle.textSize.previewSp.sp,
+                                        style = MaterialTheme.typography.bodyMedium.copy(shadow = previewShadow),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            // Font Family
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "Font Family",
+                                    color = Color.White.copy(alpha = 0.78f),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CaptionFont.entries.forEach { font ->
+                                        val isSelected = captionStyle.font == font
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = { CatalogConfig.updateCaptionStyle { it.copy(font = font) } },
+                                            label = { Text(font.label) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = Color(0xFF333C57),
+                                                selectedLabelColor = Color(0xFFA5B4FC),
+                                                containerColor = Color(0xFF282830),
+                                                labelColor = Color.White
+                                            ),
+                                            shape = RoundedCornerShape(10.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Bold Text Toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Bold Captions",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Switch(
+                                    checked = captionStyle.isBold,
+                                    onCheckedChange = { bold -> CatalogConfig.updateCaptionStyle { it.copy(isBold = bold) } },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = Color(0xFFA5B4FC)
+                                    )
+                                )
+                            }
+
+                            // Text Size
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "Text Size",
+                                    color = Color.White.copy(alpha = 0.78f),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CaptionTextSize.entries.forEach { size ->
+                                        val isSelected = captionStyle.textSize == size
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = { CatalogConfig.updateCaptionStyle { it.copy(textSize = size) } },
+                                            label = { Text(size.label) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = Color(0xFF333C57),
+                                                selectedLabelColor = Color(0xFFA5B4FC),
+                                                containerColor = Color(0xFF282830),
+                                                labelColor = Color.White
+                                            ),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Text Color Swatches
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "Text Color",
+                                    color = Color.White.copy(alpha = 0.78f),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CaptionColor.entries.forEach { col ->
+                                        val isSelected = captionStyle.textColor == col
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                                            modifier = Modifier.clickable {
+                                                CatalogConfig.updateCaptionStyle { it.copy(textColor = col) }
+                                            }
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(col.argb))
+                                                    .border(
+                                                        width = if (isSelected) 2.5.dp else 1.dp,
+                                                        color = if (isSelected) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.3f),
+                                                        shape = CircleShape
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (isSelected) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = col.label,
+                                                        tint = Color.Black,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = col.label,
+                                                color = if (isSelected) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.65f),
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Edge Style
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "Edge Style",
+                                    color = Color.White.copy(alpha = 0.78f),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CaptionEdgeStyle.entries.forEach { edge ->
+                                        val isSelected = captionStyle.edgeStyle == edge
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = { CatalogConfig.updateCaptionStyle { it.copy(edgeStyle = edge) } },
+                                            label = { Text(edge.label) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = Color(0xFF333C57),
+                                                selectedLabelColor = Color(0xFFA5B4FC),
+                                                containerColor = Color(0xFF282830),
+                                                labelColor = Color.White
+                                            ),
+                                            shape = RoundedCornerShape(10.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Background Box
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "Background",
+                                    color = Color.White.copy(alpha = 0.78f),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CaptionBackground.entries.forEach { bg ->
+                                        val isSelected = captionStyle.background == bg
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = { CatalogConfig.updateCaptionStyle { it.copy(background = bg) } },
+                                            label = { Text(bg.label) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = Color(0xFF333C57),
+                                                selectedLabelColor = Color(0xFFA5B4FC),
+                                                containerColor = Color(0xFF282830),
+                                                labelColor = Color.White
+                                            ),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Vertical Position
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "Vertical Position",
+                                    color = Color.White.copy(alpha = 0.78f),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CaptionPosition.entries.forEach { pos ->
+                                        val isSelected = captionStyle.position == pos
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = { CatalogConfig.updateCaptionStyle { it.copy(position = pos) } },
+                                            label = { Text(pos.label) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = Color(0xFF333C57),
+                                                selectedLabelColor = Color(0xFFA5B4FC),
+                                                containerColor = Color(0xFF282830),
+                                                labelColor = Color.White
+                                            ),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // AUDIO TRACKS & LANGUAGES BOTTOM SHEET
+        // ══════════════════════════════════════════════════════════════
+        AnimatedVisibility(
+            visible = showAudioSheet,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .zIndex(20f)
+        ) {
+            val serverAudioGroups = remember(availableServers, selectedAudioType) {
+                val groupedByType = availableServers
+                    .groupBy { it.type.trim().lowercase().ifBlank { "sub" } }
+                val list = groupedByType.map { (typeKey, serversForType) ->
+                    ServerAudioOption(
+                        typeKey = typeKey,
+                        displayName = audioTypeDisplayName(typeKey),
+                        shortName = audioTypeShortLanguage(typeKey),
+                        serverCount = serversForType.size
+                    )
+                }.sortedBy { audioLanguageSortOrder(it.typeKey) }
+
+                if (list.isEmpty()) {
+                    listOf(
+                        ServerAudioOption(
+                            typeKey = selectedAudioType.lowercase(),
+                            displayName = audioTypeDisplayName(selectedAudioType),
+                            shortName = audioTypeShortLanguage(selectedAudioType),
+                            serverCount = 1
+                        )
+                    )
+                } else {
+                    list
+                }
+            }
+
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = 680.dp)
+                    .fillMaxWidth()
+                    .fillMaxHeight(if (isLandscape) 0.82f else 0.56f),
+                color = Color(0xFF1E1E24),
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                shadowElevation = 16.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(vertical = 8.dp)
+                            .size(width = 44.dp, height = 4.dp)
+                            .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Headphones,
+                            contentDescription = null,
+                            tint = Color(0xFFA5B4FC),
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            text = "Audio",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Choose an available audio language for this episode",
+                        color = Color.White.copy(alpha = 0.6f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxSize().padding(bottom = 16.dp)
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = 16.dp)
                     ) {
-                        items(subOptions.distinct()) { opt ->
-                            val isSelected = (opt == "Off" && !subtitlesEnabled) || (opt != "Off" && subtitlesEnabled && selectedSubtitleTrack.equals(opt, ignoreCase = true))
+                        // Section 1: Embedded multi-audio tracks inside the active HLS/video stream (instant switch)
+                        if (embeddedAudioTracks.size > 1) {
+                            item(key = "embedded_audio_header") {
+                                Text(
+                                    text = "IN-STREAM AUDIO TRACKS",
+                                    color = Color(0xFFA5B4FC),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 2.dp, bottom = 2.dp)
+                                )
+                            }
 
+                            items(embeddedAudioTracks, key = { it.key }) { track ->
+                                val isSelected = track.key == selectedEmbeddedAudioKey ||
+                                    (selectedEmbeddedAudioKey == null && track.isSelected)
+                                Surface(
+                                    onClick = {
+                                        pendingAudioTrackSelection = track
+                                        aspectRatioToastMessage = "Audio: ${track.displayName}"
+                                        showAudioSheet = false
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
+                                    border = if (isSelected) BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.65f)) else null,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.GraphicEq,
+                                                contentDescription = null,
+                                                tint = if (isSelected) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.8f),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column {
+                                                Text(
+                                                    text = track.displayName,
+                                                    color = Color.White,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                                )
+                                                if (track.detail.isNotBlank()) {
+                                                    Text(
+                                                        text = track.detail,
+                                                        color = Color.White.copy(alpha = 0.6f),
+                                                        style = MaterialTheme.typography.labelSmall
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.CheckCircle,
+                                                contentDescription = "Selected",
+                                                tint = Color(0xFFA5B4FC),
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Section 2: Available Audio Languages from Episode Servers (Japanese, English, Indonesian, etc.)
+                        item(key = "source_audio_header") {
+                            Text(
+                                text = if (embeddedAudioTracks.size > 1) "SOURCE AUDIO STREAMS" else "AVAILABLE AUDIO",
+                                color = Color(0xFFA5B4FC),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(top = if (embeddedAudioTracks.size > 1) 8.dp else 2.dp, bottom = 2.dp)
+                            )
+                        }
+
+                        items(serverAudioGroups, key = { "srv_audio_${it.typeKey}" }) { option ->
+                            val isSelected = selectedAudioType.equals(option.typeKey, ignoreCase = true)
+                            val activeTrackDetail = if (isSelected && embeddedAudioTracks.size == 1) {
+                                embeddedAudioTracks.first().detail
+                            } else {
+                                ""
+                            }
                             Surface(
                                 onClick = {
-                                    if (opt == "Off") {
-                                        subtitlesEnabled = false
+                                    if (!isSelected) {
+                                        pendingAudioResumePosMs = currentPositionMs.coerceAtLeast(0L)
+                                        selectedEmbeddedAudioKey = null
+                                        embeddedAudioTracks = emptyList()
+                                        selectedAudioType = option.typeKey
+                                        aspectRatioToastMessage = "Switching audio to ${option.displayName}"
                                     } else {
-                                        subtitlesEnabled = true
-                                        selectedSubtitleTrack = opt
+                                        aspectRatioToastMessage = "Audio: ${option.displayName}"
                                     }
-                                    showSubtitlesSheet = false
+                                    showAudioSheet = false
                                 },
                                 shape = RoundedCornerShape(12.dp),
                                 color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
+                                border = if (isSelected) BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.65f)) else null,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
@@ -2270,25 +2953,39 @@ fun PlayerDialog(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
                                         Icon(
-                                            Icons.Default.Subtitles,
+                                            imageVector = Icons.Default.RecordVoiceOver,
                                             contentDescription = null,
-                                            tint = if (isSelected) Color(0xFFA5B4FC) else Color.White,
+                                            tint = if (isSelected) Color(0xFFA5B4FC) else Color.White.copy(alpha = 0.8f),
                                             modifier = Modifier.size(20.dp)
                                         )
                                         Spacer(modifier = Modifier.width(12.dp))
-                                        Text(
-                                            text = opt,
-                                            color = Color.White,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                        )
+                                        Column {
+                                            Text(
+                                                text = option.displayName,
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                            val subtitleParts = listOfNotNull(
+                                                "${option.serverCount} ${if (option.serverCount == 1) "server" else "servers"}",
+                                                activeTrackDetail.takeIf { it.isNotBlank() }
+                                            ).joinToString(" • ")
+                                            Text(
+                                                text = subtitleParts,
+                                                color = Color.White.copy(alpha = 0.6f),
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        }
                                     }
 
                                     if (isSelected) {
                                         Icon(
-                                            Icons.Default.CheckCircle,
+                                            imageVector = Icons.Default.CheckCircle,
                                             contentDescription = "Selected",
                                             tint = Color(0xFFA5B4FC),
                                             modifier = Modifier.size(22.dp)
@@ -2303,7 +3000,7 @@ fun PlayerDialog(
         }
 
         // ══════════════════════════════════════════════════════════════
-        // SOURCE BOTTOM SHEET (Exact Match to Image 2)
+        // SOURCE PLUGINS BOTTOM SHEET (ONLY REAL REGISTERED KANIME PLUGINS)
         // ══════════════════════════════════════════════════════════════
         AnimatedVisibility(
             visible = showSourceSheet,
@@ -2313,11 +3010,28 @@ fun PlayerDialog(
                 .align(Alignment.BottomCenter)
                 .zIndex(20f)
         ) {
+            val installedCount = remember(availablePlugins) { availablePlugins.count { it.isInstalled } }
+            val filteredPlugins = remember(availablePlugins, sourceFilterTab, extensionSearchQuery) {
+                availablePlugins
+                    .filter { plugin ->
+                        val matchesTab = if (sourceFilterTab == "Installed") plugin.isInstalled else true
+                        val matchesQuery = extensionSearchQuery.isBlank() ||
+                            plugin.name.contains(extensionSearchQuery, ignoreCase = true) ||
+                            plugin.id.contains(extensionSearchQuery, ignoreCase = true)
+                        matchesTab && matchesQuery
+                    }
+                    .sortedWith(
+                        compareByDescending<com.kanime.app.data.plugin.AnimeSourcePlugin> { it.isInstalled && it.isEnabled }
+                            .thenByDescending { it.isInstalled }
+                            .thenBy { it.name.lowercase() }
+                    )
+            }
+
             Surface(
                 modifier = Modifier
                     .widthIn(max = 680.dp)
                     .fillMaxWidth()
-                    .fillMaxHeight(if (isLandscape) 0.88f else 0.70f),
+                    .fillMaxHeight(if (isLandscape) 0.86f else 0.62f),
                 color = Color(0xFF1E1E24),
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 shadowElevation = 16.dp
@@ -2335,29 +3049,47 @@ fun PlayerDialog(
                             .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
                     )
 
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Extension,
+                            contentDescription = null,
+                            tint = Color(0xFFA5B4FC),
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            text = "Source Plugins",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Source",
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        text = "Select an installed KAnime source plugin for streaming",
+                        color = Color.White.copy(alpha = 0.6f),
+                        style = MaterialTheme.typography.bodySmall
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Extension Provider Tabs (Image 2: Mangayomi, Sora, Aniyomi, CloudStream)
-                    val providerTabs = listOf("Mangayomi", "Sora", "Aniyomi", "CloudStream")
+                    // Filter tabs: Installed vs All Catalog Plugins
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        for (tab in providerTabs) {
-                            val isChosen = selectedFramework == tab
+                        listOf(
+                            "Installed" to "Installed ($installedCount)",
+                            "All Plugins" to "All Plugins (${availablePlugins.size})"
+                        ).forEach { (tabKey, tabLabel) ->
+                            val isChosen = sourceFilterTab == tabKey
                             FilterChip(
                                 selected = isChosen,
-                                onClick = { selectedFramework = tab },
-                                label = { Text(tab) },
+                                onClick = { sourceFilterTab = tabKey },
+                                label = { Text(tabLabel) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Color(0xFF333C57),
                                     selectedLabelColor = Color(0xFFA5B4FC),
@@ -2369,108 +3101,166 @@ fun PlayerDialog(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Search extensions bar (Image 2)
-                    OutlinedTextField(
-                        value = extensionSearchQuery,
-                        onValueChange = { extensionSearchQuery = it },
-                        placeholder = { Text("Search extensions...", color = Color.White.copy(alpha = 0.5f)) },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White.copy(alpha = 0.6f)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFF282830),
-                            unfocusedContainerColor = Color(0xFF282830),
-                            focusedBorderColor = Color(0xFFA5B4FC),
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Extension Sources List (Image 2)
-                    val extensionsList = remember {
-                        listOf(
-                            ExtensionItem("kanikoto", "Anikoto", "EN", true),
-                            ExtensionItem("anilist", "AniList", "EN", false),
-                            ExtensionItem("animegg", "AnimeGG", "EN", false),
-                            ExtensionItem("123anime", "123Anime", "EN", false),
-                            ExtensionItem("animekai", "AnimeKai (Unoriginal)", "EN", false),
-                            ExtensionItem("reanime", "Re:ANIME", "EN", false),
-                            ExtensionItem("donghua", "DonghuaStream", "EN", false),
-                            ExtensionItem("anidb", "AniDB", "EN", false),
-                            ExtensionItem("anipm", "AniPM", "EN", false),
-                            ExtensionItem("animepahe", "AnimePahe", "EN", false)
+                    if (availablePlugins.size > 3) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = extensionSearchQuery,
+                            onValueChange = { extensionSearchQuery = it },
+                            placeholder = { Text("Search plugins...", color = Color.White.copy(alpha = 0.5f)) },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White.copy(alpha = 0.6f)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color(0xFF282830),
+                                unfocusedContainerColor = Color(0xFF282830),
+                                focusedBorderColor = Color(0xFFA5B4FC),
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
                         )
                     }
 
-                    val filteredExtensions = extensionsList.filter {
-                        extensionSearchQuery.isBlank() || it.name.contains(extensionSearchQuery, ignoreCase = true)
-                    }
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxSize().padding(bottom = 16.dp)
-                    ) {
-                        items(filteredExtensions) { ext ->
-                            val isSelected = ext.id == activeSourceId || (activeSourceId == "kanikoto" && ext.id == "kanikoto")
-                            Surface(
-                                onClick = {
-                                    PluginManager.setActiveSource(ext.id)
-                                    showSourceSheet = false
-                                    resolveStream()
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
-                                modifier = Modifier.fillMaxWidth()
+                    if (filteredPlugins.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 28.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                Icon(
+                                    imageVector = Icons.Default.ExtensionOff,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.45f),
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Text(
+                                    text = if (sourceFilterTab == "Installed") "No plugins installed yet" else "No matching plugins found",
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Install or manage plugins in Settings → Video Source Plugins",
+                                    color = Color.White.copy(alpha = 0.55f),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(bottom = 16.dp)
+                        ) {
+                            items(filteredPlugins, key = { it.id }) { plugin ->
+                                val isSelected = plugin.id == activeSourceId
+                                val canUse = plugin.isInstalled && plugin.isEnabled
+                                Surface(
+                                    onClick = {
+                                        if (!plugin.isInstalled) {
+                                            aspectRatioToastMessage = "${plugin.name} is not installed (Settings → Plugins)"
+                                            return@Surface
+                                        }
+                                        if (!plugin.isEnabled) {
+                                            aspectRatioToastMessage = "${plugin.name} is turned off (Settings → Plugins)"
+                                            return@Surface
+                                        }
+                                        if (!isSelected) {
+                                            pendingAudioResumePosMs = currentPositionMs.coerceAtLeast(0L)
+                                            selectedEmbeddedAudioKey = null
+                                            embeddedAudioTracks = emptyList()
+                                            selectedServer = null
+                                            availableServers = emptyList()
+                                            PluginManager.setActiveSource(plugin.id)
+                                            aspectRatioToastMessage = "Switched source to ${plugin.name}"
+                                        }
+                                        showSourceSheet = false
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isSelected) Color(0xFF333C57) else Color(0xFF282830),
+                                    border = if (isSelected) BorderStroke(1.dp, Color(0xFFA5B4FC).copy(alpha = 0.65f)) else null,
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Surface(
-                                            color = if (isSelected) Color(0xFF2196F3) else Color(0xFF37474F),
-                                            shape = CircleShape,
-                                            modifier = Modifier.size(36.dp)
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f)
                                         ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    Icons.Default.PlayArrow,
-                                                    contentDescription = null,
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(20.dp)
+                                            Surface(
+                                                color = when {
+                                                    isSelected && canUse -> Color(0xFF4F5D95)
+                                                    canUse -> Color(0xFF37474F)
+                                                    else -> Color(0xFF32323C)
+                                                },
+                                                shape = CircleShape,
+                                                modifier = Modifier.size(38.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = if (canUse) Icons.Default.Extension else Icons.Default.ExtensionOff,
+                                                        contentDescription = null,
+                                                        tint = if (canUse) Color.White else Color.White.copy(alpha = 0.45f),
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Text(
+                                                        text = plugin.name,
+                                                        color = if (canUse) Color.White else Color.White.copy(alpha = 0.6f),
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                                    )
+                                                    Text(
+                                                        text = "v${plugin.installedVersion ?: plugin.version}",
+                                                        color = Color(0xFFA5B4FC).copy(alpha = if (canUse) 0.9f else 0.5f),
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                }
+                                                val statusText = when {
+                                                    plugin.isInstalled && plugin.isEnabled -> "Installed • Active"
+                                                    plugin.isInstalled -> "Installed • Disabled"
+                                                    else -> "Not Installed"
+                                                }
+                                                Text(
+                                                    text = "$statusText • ${plugin.author}",
+                                                    color = when {
+                                                        plugin.isInstalled && plugin.isEnabled -> Color(0xFF4ADE80).copy(alpha = 0.9f)
+                                                        plugin.isInstalled -> Color(0xFFFBBF24).copy(alpha = 0.85f)
+                                                        else -> Color.White.copy(alpha = 0.45f)
+                                                    },
+                                                    style = MaterialTheme.typography.labelSmall
                                                 )
                                             }
                                         }
-                                        Spacer(modifier = Modifier.width(14.dp))
-                                        Column {
-                                            Text(
-                                                text = ext.name,
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                            )
-                                            Text(
-                                                text = ext.lang,
-                                                color = Color.White.copy(alpha = 0.6f),
-                                                style = MaterialTheme.typography.labelSmall
+
+                                        if (isSelected && canUse) {
+                                            Icon(
+                                                Icons.Default.CheckCircle,
+                                                contentDescription = "Selected",
+                                                tint = Color(0xFFA5B4FC),
+                                                modifier = Modifier.size(22.dp)
                                             )
                                         }
-                                    }
-
-                                    if (isSelected) {
-                                        Icon(
-                                            Icons.Default.CheckCircle,
-                                            contentDescription = "Selected",
-                                            tint = Color(0xFFA5B4FC),
-                                            modifier = Modifier.size(22.dp)
-                                        )
                                     }
                                 }
                             }
@@ -2901,13 +3691,144 @@ private fun BoxScope.DoubleTapSeekOverlay(
     }
 }
 
-// Data class for extensions in Source Bottom Sheet
-private data class ExtensionItem(
-    val id: String,
-    val name: String,
-    val lang: String,
-    val isInstalled: Boolean
+// Data classes & helpers for Audio track selection
+private data class EmbeddedAudioTrack(
+    val key: String,
+    val groupIndex: Int,
+    val trackIndex: Int,
+    val displayName: String,
+    val shortLanguage: String,
+    val detail: String,
+    val isSelected: Boolean,
+    val trackGroup: TrackGroup
 )
+
+private data class ServerAudioOption(
+    val typeKey: String,
+    val displayName: String,
+    val shortName: String,
+    val serverCount: Int
+)
+
+private fun audioLanguageSortOrder(typeKey: String): Int = when (typeKey.lowercase()) {
+    "sub", "ja", "jpn", "japanese" -> 0
+    "dub", "en", "eng", "english" -> 1
+    "id", "ind", "in", "indo", "indonesian" -> 2
+    "raw" -> 3
+    else -> 4
+}
+
+private fun audioTypeShortLanguage(typeKey: String): String {
+    val clean = typeKey.trim().lowercase()
+    return when {
+        clean == "sub" || clean == "raw" || clean == "ja" || clean == "jpn" || clean.contains("japan") -> "Japanese"
+        clean == "dub" || clean == "en" || clean == "eng" || clean.contains("english") -> "English"
+        clean == "id" || clean == "ind" || clean == "in" || clean.contains("indo") -> "Indonesian"
+        clean == "ms" || clean == "msa" || clean.contains("malay") -> "Malay"
+        clean == "ko" || clean == "kor" || clean.contains("korean") -> "Korean"
+        clean == "zh" || clean == "zho" || clean == "chi" || clean.contains("chin") -> "Chinese"
+        clean == "es" || clean == "spa" || clean.contains("span") -> "Spanish"
+        clean == "pt" || clean == "por" || clean.contains("portug") -> "Portuguese"
+        clean == "fr" || clean == "fra" || clean == "fre" || clean.contains("french") -> "French"
+        clean == "de" || clean == "deu" || clean == "ger" || clean.contains("german") -> "German"
+        clean == "th" || clean == "tha" || clean.contains("thai") -> "Thai"
+        clean == "vi" || clean == "vie" || clean.contains("viet") -> "Vietnamese"
+        clean == "ar" || clean == "ara" || clean.contains("arab") -> "Arabic"
+        clean == "hi" || clean == "hin" || clean.contains("hindi") -> "Hindi"
+        clean == "tl" || clean == "fil" || clean.contains("tagalog") || clean.contains("filip") -> "Filipino"
+        else -> {
+            val localeName = Locale.forLanguageTag(clean).getDisplayLanguage(Locale.ENGLISH)
+            if (localeName.isNotBlank() && !localeName.equals(clean, ignoreCase = true) && !localeName.equals("und", ignoreCase = true)) {
+                localeName.replaceFirstChar { it.uppercase() }
+            } else {
+                clean.replaceFirstChar { it.uppercase() }.ifBlank { "Japanese" }
+            }
+        }
+    }
+}
+
+private fun audioTypeDisplayName(typeKey: String): String {
+    return when (typeKey.trim().lowercase()) {
+        "sub" -> "Japanese (Original • Sub)"
+        "dub" -> "English (Dub)"
+        "raw" -> "Japanese (Raw)"
+        "id", "ind", "in", "indo", "indonesian" -> "Indonesian"
+        else -> audioTypeShortLanguage(typeKey)
+    }
+}
+
+private fun formatAudioLanguageName(
+    langCode: String?,
+    label: String?,
+    fallbackAudioType: String
+): Pair<String, String> {
+    val cleanLabel = label?.trim().orEmpty()
+    val cleanCode = langCode?.trim()?.lowercase().orEmpty()
+        .takeIf { it.isNotBlank() && it != "und" && it != "unknown" }
+
+    if (cleanCode != null) {
+        val shortLang = audioTypeShortLanguage(cleanCode)
+        val display = if (cleanLabel.isNotBlank() && !cleanLabel.equals(shortLang, ignoreCase = true) && !cleanLabel.equals(cleanCode, ignoreCase = true)) {
+            "$shortLang ($cleanLabel)"
+        } else {
+            shortLang
+        }
+        return Pair(display, shortLang)
+    }
+
+    if (cleanLabel.isNotBlank() && !cleanLabel.equals("und", ignoreCase = true) && !cleanLabel.equals("unknown", ignoreCase = true)) {
+        val shortLang = audioTypeShortLanguage(cleanLabel)
+        val display = if (cleanLabel.equals(shortLang, ignoreCase = true)) shortLang else cleanLabel
+        return Pair(display, shortLang)
+    }
+
+    val fallbackShort = audioTypeShortLanguage(fallbackAudioType)
+    return Pair(audioTypeDisplayName(fallbackAudioType), fallbackShort)
+}
+
+private fun extractEmbeddedAudioTracks(tracks: Tracks, fallbackAudioType: String): List<EmbeddedAudioTrack> {
+    val result = mutableListOf<EmbeddedAudioTrack>()
+    tracks.groups.forEachIndexed { groupIdx, group ->
+        if (group.type != C.TRACK_TYPE_AUDIO) return@forEachIndexed
+        val mediaGroup = group.mediaTrackGroup
+        for (trackIdx in 0 until mediaGroup.length) {
+            if (!group.isTrackSupported(trackIdx)) continue
+            val fmt = mediaGroup.getFormat(trackIdx)
+            val (displayName, shortLang) = formatAudioLanguageName(fmt.language, fmt.label, fallbackAudioType)
+            val channelLabel = when (fmt.channelCount) {
+                1 -> "Mono"
+                2 -> "Stereo"
+                6 -> "5.1 Surround"
+                8 -> "7.1 Surround"
+                else -> if (fmt.channelCount > 0) "${fmt.channelCount}ch" else null
+            }
+            val codecLabel = when {
+                fmt.sampleMimeType?.contains("mp4a", ignoreCase = true) == true || fmt.codecs?.startsWith("mp4a", ignoreCase = true) == true -> "AAC"
+                fmt.sampleMimeType?.contains("eac3", ignoreCase = true) == true -> "Dolby Digital+"
+                fmt.sampleMimeType?.contains("ac3", ignoreCase = true) == true -> "Dolby Digital"
+                fmt.sampleMimeType?.contains("opus", ignoreCase = true) == true -> "Opus"
+                fmt.sampleMimeType?.contains("flac", ignoreCase = true) == true -> "FLAC"
+                else -> null
+            }
+            val bitrateLabel = if (fmt.bitrate > 0) "${fmt.bitrate / 1000} kbps" else null
+            val detail = listOfNotNull(channelLabel, codecLabel, bitrateLabel).joinToString(" • ")
+
+            result.add(
+                EmbeddedAudioTrack(
+                    key = "${groupIdx}_${trackIdx}_${fmt.id.orEmpty()}_${fmt.language.orEmpty()}",
+                    groupIndex = groupIdx,
+                    trackIndex = trackIdx,
+                    displayName = displayName,
+                    shortLanguage = shortLang,
+                    detail = detail,
+                    isSelected = group.isTrackSelected(trackIdx),
+                    trackGroup = mediaGroup
+                )
+            )
+        }
+    }
+    return result
+}
 
 // Reusable Action Pill Button (Image 1)
 @Composable

@@ -8,9 +8,12 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
 
+    <!-- Dynamic plugin discovery on Android 11+ without hardcoding plugin packages or authorities -->
     <queries>
-        <package android:name="com.kanime.plugin.kanikoto" />
         <intent>
             <action android:name="com.kanime.plugin.SOURCE" />
         </intent>

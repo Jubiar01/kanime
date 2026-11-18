@@ -29,8 +29,14 @@ data class CatalogUpdateInfo(
     val newVersion: Int,
     val releaseNotes: String,
     val remoteJson: String,
-    val plugins: List<AnimeSourcePlugin> = emptyList()
-)
+    val plugins: List<AnimeSourcePlugin> = emptyList(),
+    val newPlugins: List<AnimeSourcePlugin> = emptyList(),
+    val updatedPlugins: List<AnimeSourcePlugin> = emptyList(),
+    val metadataUpdatedCount: Int = 0
+) {
+    val hasCatalogTemplateUpdate: Boolean get() = hasUpdate
+    val hasPluginUpdates: Boolean get() = updatedPlugins.isNotEmpty()
+}
 
 object PluginManager {
 
@@ -163,12 +169,15 @@ object PluginManager {
                     }
                 }
 
+                val pkgName = obj.optString("packageName", "").trim()
+                val authority = obj.optString("providerAuthority", "").trim()
+                    .ifBlank { if (pkgName.isNotBlank()) "$pkgName.provider" else "" }
                 list.add(
                     AnimeSourcePlugin(
                         id = obj.optString("id", "plugin_$i"),
                         name = obj.optString("name", "Unknown Plugin"),
-                        packageName = obj.optString("packageName", ""),
-                        providerAuthority = obj.optString("providerAuthority", "com.kanime.plugin.kanikoto.provider"),
+                        packageName = pkgName,
+                        providerAuthority = authority,
                         version = obj.optString("version", "1.0.0"),
                         versionCode = obj.optInt("versionCode", 1),
                         author = obj.optString("author", "Community"),
@@ -238,9 +247,55 @@ object PluginManager {
         }
     }
 
+    private fun appendCacheBuster(rawUrl: String): String {
+        val separator = if (rawUrl.contains("?")) "&" else "?"
+        return "${rawUrl}${separator}_ts=${System.currentTimeMillis()}"
+    }
+
+    private fun hasPluginMetadataChanged(local: AnimeSourcePlugin, remote: AnimeSourcePlugin): Boolean {
+        return local.version != remote.version ||
+            local.versionCode != remote.versionCode ||
+            local.apkDownloadUrl != remote.apkDownloadUrl ||
+            local.apkSize != remote.apkSize ||
+            local.changelog != remote.changelog ||
+            local.name != remote.name ||
+            local.description != remote.description ||
+            local.sourceUrl != remote.sourceUrl ||
+            local.apkFileName != remote.apkFileName ||
+            local.providerAuthority != remote.providerAuthority ||
+            local.author != remote.author ||
+            local.capabilities != remote.capabilities
+    }
+
+    private fun inspectInstalledPlugin(context: Context, plugin: AnimeSourcePlugin): Pair<String?, Boolean> {
+        if (!PluginBridge.isPluginInstalled(context, plugin.packageName)) {
+            return Pair(null, false)
+        }
+        return try {
+            val pInfo = context.packageManager.getPackageInfo(plugin.packageName, 0)
+            val installedVer = pInfo.versionName ?: "1.0.0"
+            val installedVerCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                pInfo.versionCode.toLong()
+            }
+            val semverDiff = compareVersions(plugin.version, installedVer)
+            val updateAvailable = semverDiff > 0 ||
+                (semverDiff == 0 && plugin.versionCode > 0 && plugin.versionCode.toLong() > installedVerCode)
+            Pair(installedVer, updateAvailable)
+        } catch (_: Exception) {
+            Pair(null, false)
+        }
+    }
+
     /**
-     * Checks online for an updated plugins.json list using plugin_config_version.
-     * Returns a CatalogUpdateInfo containing version, changelog/release notes, and preview plugins.
+     * Checks online for BOTH:
+     * 1. Template Catalog updates (new `plugin_config_version` or new plugins added to the catalog).
+     * 2. Individual Plugin updates (newer `version`/`versionCode` or updated APK metadata for existing plugins).
+     *
+     * Existing plugin metadata (e.g. KAnikoto 1.0.0 -> 1.0.1) is synced immediately so plugin update actions
+     * appear right away even when the catalog template version hasn't changed.
      */
     suspend fun checkForCatalogUpdate(context: Context, customUrl: String? = null): Result<CatalogUpdateInfo> = withContext(Dispatchers.IO) {
         try {
@@ -250,11 +305,17 @@ object PluginManager {
                 return@withContext Result.failure(Exception("No update URL configured"))
             }
 
-            val url = URL(targetUrl)
+            // Ensure local state and _pluginConfigVersion are loaded first
+            val localPlugins = loadPluginsFromJson(context)
+
+            val url = URL(appendCacheBuster(targetUrl))
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 10000
                 readTimeout = 15000
                 instanceFollowRedirects = true
+                useCaches = false
+                setRequestProperty("Cache-Control", "no-cache, no-store")
+                setRequestProperty("Pragma", "no-cache")
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Android; KAnime)")
             }
             conn.connect()
@@ -263,6 +324,8 @@ object PluginManager {
             }
 
             val remoteJson = conn.inputStream.bufferedReader().use { it.readText() }
+            conn.disconnect()
+
             val rootObj = JSONObject(remoteJson)
             val remoteVer = rootObj.optInt("plugin_config_version", 1)
             val notes = rootObj.optString("release_notes").takeIf { it.isNotBlank() }
@@ -281,40 +344,95 @@ object PluginManager {
                         caps.add(capsArray.getString(c))
                     }
                 }
+                val pkgName = obj.optString("packageName", "").trim()
+                val authority = obj.optString("providerAuthority", "").trim()
+                    .ifBlank { if (pkgName.isNotBlank()) "$pkgName.provider" else "" }
+                val parsed = AnimeSourcePlugin(
+                    id = obj.optString("id", "plugin_$i"),
+                    name = obj.optString("name", "Unknown Plugin"),
+                    packageName = pkgName,
+                    providerAuthority = authority,
+                    version = obj.optString("version", "1.0.0"),
+                    versionCode = obj.optInt("versionCode", 1),
+                    author = obj.optString("author", "Community"),
+                    description = obj.optString("description", ""),
+                    isInstalled = false,
+                    isEnabled = true,
+                    isDefault = obj.optBoolean("isDefault", false),
+                    capabilities = caps,
+                    sourceUrl = obj.optString("sourceUrl", ""),
+                    apkFileName = obj.optString("apkFileName", "plugin.apk"),
+                    apkDownloadUrl = obj.optString("apkDownloadUrl").takeIf { it.isNotBlank() },
+                    apkSize = obj.optString("apkSize", "N/A"),
+                    isApkDownloaded = false,
+                    changelog = obj.optString("changelog").takeIf { it.isNotBlank() }
+                )
+                val (installedVer, hasPkgUpdate) = inspectInstalledPlugin(context, parsed)
                 remotePlugins.add(
-                    AnimeSourcePlugin(
-                        id = obj.optString("id", "plugin_$i"),
-                        name = obj.optString("name", "Unknown Plugin"),
-                        packageName = obj.optString("packageName", ""),
-                        providerAuthority = obj.optString("providerAuthority", "com.kanime.plugin.kanikoto.provider"),
-                        version = obj.optString("version", "1.0.0"),
-                        versionCode = obj.optInt("versionCode", 1),
-                        author = obj.optString("author", "Community"),
-                        description = obj.optString("description", ""),
-                        isInstalled = false,
-                        isEnabled = true,
-                        isDefault = obj.optBoolean("isDefault", false),
-                        capabilities = caps,
-                        sourceUrl = obj.optString("sourceUrl", ""),
-                        apkFileName = obj.optString("apkFileName", "plugin.apk"),
-                        apkDownloadUrl = obj.optString("apkDownloadUrl").takeIf { it.isNotBlank() },
-                        apkSize = obj.optString("apkSize", "N/A"),
-                        isApkDownloaded = false,
-                        changelog = obj.optString("changelog").takeIf { it.isNotBlank() }
+                    parsed.copy(
+                        isInstalled = installedVer != null,
+                        installedVersion = installedVer,
+                        hasUpdate = hasPkgUpdate
                     )
                 )
             }
 
-            Log.d(TAG, "Remote config version: $remoteVer, current version: $_pluginConfigVersion")
-            val hasUpdate = remoteVer > _pluginConfigVersion
+            // 1. Detect Template Catalog Update (new config version or newly added plugins)
+            val newPlugins = remotePlugins.filter { remote ->
+                localPlugins.none { local ->
+                    local.id == remote.id ||
+                        (remote.packageName.isNotBlank() && local.packageName == remote.packageName)
+                }
+            }
+            val hasTemplateUpdate = (remoteVer > _pluginConfigVersion) || newPlugins.isNotEmpty()
+
+            // 2. Sync updated metadata for existing plugins immediately (independent of template version)
+            var metadataUpdatedCount = 0
+            val mergedExisting = localPlugins.map { local ->
+                val remoteMatch = remotePlugins.firstOrNull { remote ->
+                    remote.id == local.id ||
+                        (local.packageName.isNotBlank() && remote.packageName == local.packageName)
+                }
+                if (remoteMatch != null && hasPluginMetadataChanged(local, remoteMatch)) {
+                    metadataUpdatedCount++
+                    remoteMatch.copy(
+                        isInstalled = local.isInstalled,
+                        installedVersion = local.installedVersion,
+                        hasUpdate = local.hasUpdate,
+                        isEnabled = local.isEnabled,
+                        isApkDownloaded = local.isApkDownloaded
+                    )
+                } else {
+                    local
+                }
+            }
+
+            if (metadataUpdatedCount > 0) {
+                savePluginsToJson(context, mergedExisting)
+            }
+
+            // Refresh live installed status & UI state flow so "Update vX.Y.Z" buttons appear immediately
+            checkPluginStatus(context)
+
+            val updatedPlugins = remotePlugins.filter { it.isInstalled && it.hasUpdate }
+
+            Log.d(
+                TAG,
+                "Catalog check done: remoteVer=$remoteVer, localVer=$_pluginConfigVersion, " +
+                    "templateUpdate=$hasTemplateUpdate, newPlugins=${newPlugins.size}, " +
+                    "pluginUpdates=${updatedPlugins.size}, metadataSynced=$metadataUpdatedCount"
+            )
 
             val updateInfo = CatalogUpdateInfo(
-                hasUpdate = hasUpdate,
+                hasUpdate = hasTemplateUpdate,
                 currentVersion = _pluginConfigVersion,
                 newVersion = remoteVer,
                 releaseNotes = notes,
                 remoteJson = remoteJson,
-                plugins = remotePlugins
+                plugins = remotePlugins,
+                newPlugins = newPlugins,
+                updatedPlugins = updatedPlugins,
+                metadataUpdatedCount = metadataUpdatedCount
             )
 
             Result.success(updateInfo)
@@ -325,14 +443,30 @@ object PluginManager {
     }
 
     /**
-     * Applies a catalog update by writing remoteJson to storage and refreshing plugins.
+     * Applies a Template Catalog update by merging remote catalog plugins (preserving custom local plugins),
+     * updating config version/release notes, and refreshing installed plugin status.
      */
     fun applyCatalogUpdate(context: Context, updateInfo: CatalogUpdateInfo) {
         try {
-            val file = File(context.filesDir, PLUGINS_JSON_FILE)
-            file.writeText(updateInfo.remoteJson)
-            _pluginConfigVersion = updateInfo.newVersion
-            _catalogReleaseNotes = updateInfo.releaseNotes
+            val currentLocal = loadPluginsFromJson(context)
+            _pluginConfigVersion = maxOf(_pluginConfigVersion, updateInfo.newVersion)
+            if (updateInfo.releaseNotes.isNotBlank()) {
+                _catalogReleaseNotes = updateInfo.releaseNotes
+            }
+
+            if (updateInfo.plugins.isNotEmpty()) {
+                val customLocalPlugins = currentLocal.filter { local ->
+                    updateInfo.plugins.none { remote ->
+                        remote.id == local.id ||
+                            (local.packageName.isNotBlank() && remote.packageName == local.packageName)
+                    }
+                }
+                savePluginsToJson(context, updateInfo.plugins + customLocalPlugins)
+            } else if (updateInfo.remoteJson.isNotBlank()) {
+                val file = File(context.filesDir, PLUGINS_JSON_FILE)
+                file.writeText(updateInfo.remoteJson)
+            }
+
             checkPluginStatus(context)
         } catch (e: Exception) {
             Log.e(TAG, "Error applying catalog update", e)
@@ -367,11 +501,14 @@ object PluginManager {
                 }
             }
 
+            val pkgName = obj.optString("packageName", "").trim()
+            val authority = obj.optString("providerAuthority", "").trim()
+                .ifBlank { if (pkgName.isNotBlank()) "$pkgName.provider" else "" }
             val newPlugin = AnimeSourcePlugin(
                 id = obj.optString("id", "plugin_${System.currentTimeMillis()}"),
                 name = obj.optString("name", "New Source Plugin"),
-                packageName = obj.optString("packageName", ""),
-                providerAuthority = obj.optString("providerAuthority", "com.kanime.plugin.kanikoto.provider"),
+                packageName = pkgName,
+                providerAuthority = authority,
                 version = obj.optString("version", "1.0.0"),
                 versionCode = obj.optInt("versionCode", 1),
                 author = obj.optString("author", "Community"),
@@ -405,23 +542,32 @@ object PluginManager {
     }
 
     /**
-     * Compares remote vs local semantic versions (e.g. "1.2.0" vs "1.1.0").
+     * Compares two semantic version strings (e.g. "1.0.1" vs "1.0.0").
+     * Returns > 0 if remote > local, 0 if equal, < 0 if remote < local.
      */
-    fun isNewerVersion(remote: String, local: String): Boolean {
+    fun compareVersions(remote: String, local: String): Int {
         return try {
-            val rParts = remote.removePrefix("v").split(".").map { it.toIntOrNull() ?: 0 }
-            val lParts = local.removePrefix("v").split(".").map { it.toIntOrNull() ?: 0 }
+            val rParts = remote.trim().removePrefix("v").removePrefix("V")
+                .substringBefore("-").split(".").map { it.toIntOrNull() ?: 0 }
+            val lParts = local.trim().removePrefix("v").removePrefix("V")
+                .substringBefore("-").split(".").map { it.toIntOrNull() ?: 0 }
             val maxLen = maxOf(rParts.size, lParts.size)
             for (i in 0 until maxLen) {
                 val r = rParts.getOrElse(i) { 0 }
                 val l = lParts.getOrElse(i) { 0 }
-                if (r > l) return true
-                if (r < l) return false
+                if (r != l) return r.compareTo(l)
             }
-            false
+            0
         } catch (_: Exception) {
-            false
+            0
         }
+    }
+
+    /**
+     * Compares remote vs local semantic versions (e.g. "1.2.0" vs "1.1.0").
+     */
+    fun isNewerVersion(remote: String, local: String): Boolean {
+        return compareVersions(remote, local) > 0
     }
 
     fun isPluginEnabledPref(context: Context, pluginId: String): Boolean {
@@ -450,17 +596,10 @@ object PluginManager {
             val isPkgInstalled = PluginBridge.isPluginInstalled(context, plugin.packageName)
             val isApkDownloaded = (apkFile.exists() && apkFile.length() > 0) || (altFile.exists() && altFile.length() > 0)
 
-            var installedVer: String? = null
-            var updateAvailable = false
-
-            if (isPkgInstalled) {
-                try {
-                    val pInfo = context.packageManager.getPackageInfo(plugin.packageName, 0)
-                    installedVer = pInfo.versionName ?: "1.0.0"
-                    updateAvailable = isNewerVersion(plugin.version, installedVer)
-                } catch (e: Exception) {
-                    installedVer = null
-                }
+            val (installedVer, updateAvailable) = if (isPkgInstalled) {
+                inspectInstalledPlugin(context, plugin)
+            } else {
+                Pair(null, false)
             }
 
             val isEnabledPref = isPluginEnabledPref(context, plugin.id)
@@ -475,6 +614,15 @@ object PluginManager {
         }
 
         _plugins.value = updated
+
+        // If the currently selected activeSourceId isn't installed & enabled, automatically switch to an active installed plugin
+        val currentActive = updated.firstOrNull { it.id == _activeSourceId.value }
+        if (currentActive == null || !currentActive.isInstalled || !currentActive.isEnabled) {
+            val fallbackActive = updated.firstOrNull { it.isInstalled && it.isEnabled }
+            if (fallbackActive != null) {
+                _activeSourceId.value = fallbackActive.id
+            }
+        }
     }
 
     fun togglePlugin(id: String) {
@@ -598,12 +746,16 @@ object PluginManager {
             }
 
             val targetApk = File(downloadsDir, plugin.apkFileName)
+            val tempApk = File(downloadsDir, "${plugin.apkFileName}.tmp")
 
-            val url = URL(downloadUrl)
+            val url = URL(appendCacheBuster(downloadUrl))
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 15000
                 readTimeout = 30000
                 instanceFollowRedirects = true
+                useCaches = false
+                setRequestProperty("Cache-Control", "no-cache, no-store")
+                setRequestProperty("Pragma", "no-cache")
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Android; KAnime)")
             }
             conn.connect()
@@ -617,10 +769,10 @@ object PluginManager {
                 return@withContext Result.failure(Exception(msg))
             }
 
-            val totalBytes = conn.contentLength.toLong().takeIf { it > 0 } ?: (3L * 1024 * 1024)
+            val totalBytes = conn.contentLength.toLong().takeIf { it > 0 } ?: (256L * 1024)
             val inputStream: InputStream = conn.inputStream
 
-            FileOutputStream(targetApk).use { output ->
+            FileOutputStream(tempApk).use { output ->
                 val buffer = ByteArray(8192)
                 var bytesRead: Int
                 var totalCopied = 0L
@@ -636,6 +788,12 @@ object PluginManager {
             }
             inputStream.close()
             conn.disconnect()
+
+            if (targetApk.exists()) targetApk.delete()
+            if (!tempApk.renameTo(targetApk)) {
+                tempApk.copyTo(targetApk, overwrite = true)
+                tempApk.delete()
+            }
 
             withContext(Dispatchers.Main) {
                 checkPluginStatus(context)

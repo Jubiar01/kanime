@@ -37,6 +37,7 @@ fun SettingsScreen(
     val animeUpscaleQuality by CatalogConfig.animeUpscaleQualityFlow.collectAsState()
     val animeSharpenStrength by CatalogConfig.animeSharpenStrengthFlow.collectAsState()
     val activePluginCount = plugins.count { it.isInstalled && it.isEnabled }
+    val pluginUpdateCount = plugins.count { it.hasUpdate }
 
     LaunchedEffect(Unit) {
         PluginManager.checkPluginStatus(context)
@@ -130,6 +131,21 @@ fun SettingsScreen(
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                         fontWeight = FontWeight.Bold
                                     )
+                                }
+                                if (pluginUpdateCount > 0) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "$pluginUpdateCount Update${if (pluginUpdateCount > 1) "s" else ""}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
                             Spacer(modifier = Modifier.height(2.dp))

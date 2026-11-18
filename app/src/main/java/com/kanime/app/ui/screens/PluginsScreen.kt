@@ -57,16 +57,18 @@ fun PluginsScreen(
         }
     }
 
-    // Sync plugin install status and check online catalog updates on launch
+    // Sync plugin install status and check online updates (Catalog Template + Plugin Updates) on launch
     LaunchedEffect(Unit) {
         PluginManager.checkPluginStatus(context)
         val res = PluginManager.checkForCatalogUpdate(context)
         res.onSuccess { info ->
-            if (info.hasUpdate) {
+            if (info.hasCatalogTemplateUpdate) {
                 catalogUpdateInfo = info
             }
         }
     }
+
+    val pluginUpdatesAvailable = remember(plugins) { plugins.filter { it.hasUpdate } }
 
     var downloadingPluginId by remember { mutableStateOf<String?>(null) }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
@@ -99,16 +101,20 @@ fun PluginsScreen(
                             }
                         ) {
                             Text(
-                                text = "Config v$configVersion • Online Delivery",
+                                text = if (pluginUpdatesAvailable.isNotEmpty()) {
+                                    "Template v$configVersion • ${pluginUpdatesAvailable.size} plugin update${if (pluginUpdatesAvailable.size > 1) "s" else ""}"
+                                } else {
+                                    "Template v$configVersion • Online Delivery"
+                                },
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = if (pluginUpdatesAvailable.isNotEmpty()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = "Release Notes",
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = if (pluginUpdatesAvailable.isNotEmpty()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(13.dp)
                             )
                         }
@@ -120,22 +126,46 @@ fun PluginsScreen(
                     }
                 },
                 actions = {
-                    // Check for online updates to the plugin catalog
+                    // Check for online updates: both Catalog Template (new plugins) & Plugin Updates (new APK versions)
                     IconButton(
                         onClick = {
                             coroutineScope.launch {
                                 isCheckingCatalog = true
-                                Toast.makeText(context, "Checking for catalog updates...", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Checking catalog template & plugin updates...", Toast.LENGTH_SHORT).show()
                                 val res = PluginManager.checkForCatalogUpdate(context)
                                 isCheckingCatalog = false
                                 res.onSuccess { info ->
-                                    if (info.hasUpdate) {
-                                        catalogUpdateInfo = info
-                                    } else {
-                                        Toast.makeText(context, "Plugin catalog is up-to-date (config v${info.currentVersion}).", Toast.LENGTH_SHORT).show()
+                                    when {
+                                        info.hasCatalogTemplateUpdate -> {
+                                            catalogUpdateInfo = info
+                                        }
+                                        info.hasPluginUpdates -> {
+                                            val summary = info.updatedPlugins.joinToString(", ") {
+                                                "${it.name} v${it.version}"
+                                            }
+                                            Toast.makeText(
+                                                context,
+                                                "Plugin update available: $summary",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                        info.metadataUpdatedCount > 0 -> {
+                                            Toast.makeText(
+                                                context,
+                                                "Synced latest plugin info (${info.metadataUpdatedCount} updated).",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                        else -> {
+                                            Toast.makeText(
+                                                context,
+                                                "Catalog template (v${info.currentVersion}) and all plugins are up to date.",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
                                     }
                                 }.onFailure { err ->
-                                    Toast.makeText(context, "Update check: ${err.message}", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Update check failed: ${err.message}", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         },
@@ -174,6 +204,73 @@ fun PluginsScreen(
             contentPadding = PaddingValues(top = 12.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Dedicated Plugin Updates Banner (separate from Catalog Template updates)
+            if (pluginUpdatesAvailable.isNotEmpty()) {
+                item(key = "plugin_updates_banner") {
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SystemUpdate,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "${pluginUpdatesAvailable.size} Plugin Update${if (pluginUpdatesAvailable.size > 1) "s" else ""} Available",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                            }
+                            pluginUpdatesAvailable.forEach { updatable ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = updatable.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                        Text(
+                                            text = "v${updatable.installedVersion ?: "?"} ➜ v${updatable.version} • ${updatable.apkSize}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(
+                                        onClick = { pluginToUpdate = updatable },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.tertiary,
+                                            contentColor = MaterialTheme.colorScheme.onTertiary
+                                        )
+                                    ) {
+                                        Text("Update", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             items(plugins, key = { it.id }) { plugin ->
                 Card(
                     shape = RoundedCornerShape(18.dp),
@@ -224,13 +321,17 @@ fun PluginsScreen(
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Surface(
-                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                            color = if (plugin.hasUpdate) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
                                             shape = RoundedCornerShape(6.dp)
                                         ) {
                                             Text(
-                                                text = "v${plugin.version}",
+                                                text = if (plugin.hasUpdate && plugin.installedVersion != null) {
+                                                    "v${plugin.installedVersion} ➜ v${plugin.version}"
+                                                } else {
+                                                    "v${plugin.version}"
+                                                },
                                                 style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                color = if (plugin.hasUpdate) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                                 fontWeight = FontWeight.Bold
                                             )
@@ -351,9 +452,17 @@ fun PluginsScreen(
 
                             if (plugin.isInstalled) {
                                 Text(
-                                    text = if (plugin.isEnabled) "Enabled for streaming" else "Turned off",
+                                    text = when {
+                                        plugin.hasUpdate -> "v${plugin.installedVersion ?: "?"} ➜ v${plugin.version}"
+                                        plugin.isEnabled -> "Enabled for streaming"
+                                        else -> "Turned off"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (plugin.isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                    color = when {
+                                        plugin.hasUpdate -> MaterialTheme.colorScheme.tertiary
+                                        plugin.isEnabled -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                                    },
                                     fontWeight = FontWeight.Medium
                                 )
                             }
@@ -792,13 +901,17 @@ fun PluginsScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = if (info.hasUpdate) "Catalog Update Available" else "Catalog Release Notes",
+                                text = if (info.hasCatalogTemplateUpdate) "Catalog Template Update" else "Catalog Template Info",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = if (info.hasUpdate) "Config v${info.currentVersion} ➜ Config v${info.newVersion}" else "Current Config v${info.currentVersion}",
+                                text = when {
+                                    info.newVersion > info.currentVersion -> "Template v${info.currentVersion} ➜ Template v${info.newVersion}"
+                                    info.newPlugins.isNotEmpty() -> "${info.newPlugins.size} new plugin${if (info.newPlugins.size > 1) "s" else ""} added • Template v${info.newVersion}"
+                                    else -> "Current Template v${info.currentVersion}"
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold
@@ -899,6 +1012,7 @@ fun PluginsScreen(
                                 }
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
+                                    val isNewPlugin = info.newPlugins.any { it.id == plugin.id }
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
                                             text = plugin.name,
@@ -908,11 +1022,44 @@ fun PluginsScreen(
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            text = "v${plugin.version}",
+                                            text = if (plugin.hasUpdate && plugin.installedVersion != null) {
+                                                "v${plugin.installedVersion} ➜ v${plugin.version}"
+                                            } else {
+                                                "v${plugin.version}"
+                                            },
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
+                                            color = if (plugin.hasUpdate) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
                                             fontWeight = FontWeight.SemiBold
                                         )
+                                        if (isNewPlugin) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.primaryContainer,
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "NEW",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        } else if (plugin.hasUpdate) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "UPDATE",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
                                     }
                                     Text(
                                         text = "${plugin.packageName} • ${plugin.apkSize}",
@@ -940,19 +1087,19 @@ fun PluginsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (info.hasUpdate) {
+                    if (info.hasCatalogTemplateUpdate) {
                         Button(
                             onClick = {
                                 PluginManager.applyCatalogUpdate(context, info)
                                 catalogUpdateInfo = null
-                                Toast.makeText(context, "Catalog updated to Config v${info.newVersion}!", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Catalog template updated to v${info.newVersion}!", Toast.LENGTH_SHORT).show()
                             },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Apply Update")
+                            Text("Apply Template")
                         }
 
                         OutlinedButton(
