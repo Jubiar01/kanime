@@ -39,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -50,7 +51,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,19 +60,21 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import coil3.compose.AsyncImage
-import coil3.request.ImageRequest
-import coil3.request.crossfade
 import com.kanime.app.R
 import com.kanime.app.data.model.Anime
 import com.kanime.app.data.repository.AnimeRepository
 import com.kanime.app.ui.theme.KAnimeTheme
 import com.kanime.app.ui.theme.KanimeGlass
+import com.kanime.app.ui.theme.KanimeMotion
 import com.kanime.app.ui.theme.KanimeSpacing
 import com.kanime.app.ui.theme.KanimeWindowWidthSizeClass
 import com.kanime.app.ui.theme.LocalWindowSizeClass
 import com.kanime.app.ui.theme.PillShape
+import com.kanime.app.ui.theme.rememberBoundedImageRequest
+import com.kanime.app.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlin.math.absoluteValue
 
 /**
@@ -157,19 +160,17 @@ fun HeroBannerCarousel(
         }
 
         if (items.size > 1) {
+            val activePage by remember(pagerState) { derivedStateOf { pagerState.currentPage } }
             Spacer(modifier = Modifier.height(KanimeSpacing.md))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 repeat(items.size) { idx ->
-                    val isSelected = pagerState.currentPage == idx
+                    val isSelected = activePage == idx
                     val dotWidth by animateDpAsState(
                         targetValue = if (isSelected) 22.dp else 6.dp,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow
-                        ),
+                        animationSpec = KanimeMotion.dotSpring(),
                         label = "BannerDotWidth"
                     )
                     Box(
@@ -212,7 +213,9 @@ fun HeroBanner(
     rank: Int? = null,
     pageOffsetProvider: (() -> Float)? = null
 ) {
-    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val locale = remember(configuration) { configuration.locales[0] ?: Locale.getDefault() }
+    val reduceMotion = rememberReduceMotion()
     val glass = KanimeGlass.tokens
     val colorScheme = MaterialTheme.colorScheme
     val windowSize = LocalWindowSizeClass.current
@@ -224,12 +227,13 @@ fun HeroBanner(
         else -> 340.dp
     }
 
-    val bannerModel = remember(anime.bannerUrl, anime.coverUrl) {
-        val url = anime.bannerUrl.ifBlank { anime.coverUrl }
-        ImageRequest.Builder(context)
-            .data(url)
-            .crossfade(240)
-            .build()
+    val bannerModel = rememberBoundedImageRequest(
+        url = anime.bannerUrl.ifBlank { anime.coverUrl },
+        widthDp = windowSize.screenWidthDp.dp.coerceAtMost(720.dp),
+        heightDp = bannerHeight
+    )
+    val formattedScore = remember(anime.score, locale) {
+        if (anime.score > 0.0) String.format(locale, "%.1f", anime.score) else null
     }
 
     // Bottom scrim fades cleanly into background so onSurface text achieves > 10:1 contrast in both modes
@@ -264,10 +268,12 @@ fun HeroBanner(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    val offset = pageOffsetProvider?.invoke() ?: 0f
-                    scaleX = 1.08f
-                    scaleY = 1.08f
-                    translationX = (-offset * 34.dp.toPx()).coerceIn(-48f, 48f)
+                    if (!reduceMotion) {
+                        val offset = pageOffsetProvider?.invoke() ?: 0f
+                        scaleX = 1.08f
+                        scaleY = 1.08f
+                        translationX = (-offset * 34.dp.toPx()).coerceIn(-48f, 48f)
+                    }
                 },
             contentScale = ContentScale.Crop
         )
@@ -305,7 +311,7 @@ fun HeroBanner(
                 Spacer(modifier = Modifier.width(1.dp))
             }
 
-            if (anime.score > 0.0) {
+            if (formattedScore != null) {
                 GlassSurface(
                     shape = PillShape,
                     overMedia = true,
@@ -323,7 +329,7 @@ fun HeroBanner(
                             modifier = Modifier.size(13.dp)
                         )
                         Text(
-                            text = String.format("%.1f", anime.score),
+                            text = formattedScore,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = colorScheme.onSurface

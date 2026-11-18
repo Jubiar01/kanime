@@ -41,6 +41,8 @@ object PluginBridge {
     private const val TAG = "PluginBridge"
     const val KANIKOTO_AUTHORITY = "com.kanime.plugin.kanikoto.provider"
     const val KANIKOTO_PACKAGE = "com.kanime.plugin.kanikoto"
+    const val KOPENSUBTITLE_AUTHORITY = "com.kanime.plugin.kopensubtitle.provider"
+    const val KOPENSUBTITLE_PACKAGE = "com.kanime.plugin.kopensubtitle"
 
     fun isPluginInstalled(context: Context, packageName: String = KANIKOTO_PACKAGE): Boolean {
         if (packageName.isBlank()) return false
@@ -165,6 +167,64 @@ object PluginBridge {
         } catch (e: Exception) {
             Log.e(TAG, "parse stream error", e)
             null
+        }
+    }
+
+    /**
+     * Queries an installed subtitle plugin (e.g. KOpenSubtitle) for online subtitle tracks
+     * when the active video source plugin does not provide subtitles.
+     */
+    suspend fun getOnlineSubtitles(
+        context: Context,
+        title: String,
+        episode: Int,
+        season: Int = 1,
+        englishTitle: String? = null,
+        romajiTitle: String? = null,
+        year: Int = 0,
+        malId: Int? = null,
+        anilistId: Int? = null,
+        kitsuId: Int? = null,
+        mediaType: String? = null,
+        episodeTitle: String? = null,
+        episodeAired: String? = null,
+        authority: String = KOPENSUBTITLE_AUTHORITY
+    ): List<PluginSubtitle> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JSONObject().apply {
+                put("title", title)
+                put("episode", episode)
+                put("season", season)
+                if (!englishTitle.isNullOrBlank()) put("englishTitle", englishTitle)
+                if (!romajiTitle.isNullOrBlank()) put("romajiTitle", romajiTitle)
+                if (year > 0) put("year", year)
+                if (malId != null && malId > 0) put("malId", malId)
+                if (anilistId != null && anilistId > 0) put("anilistId", anilistId)
+                if (kitsuId != null && kitsuId > 0) put("kitsuId", kitsuId)
+                if (!mediaType.isNullOrBlank()) put("mediaType", mediaType)
+                if (!episodeTitle.isNullOrBlank()) put("episodeTitle", episodeTitle)
+                if (!episodeAired.isNullOrBlank()) put("episodeAired", episodeAired)
+            }
+            val bundle = callProvider(context, authority, "getSubtitles", payload.toString())
+            val jsonStr = bundle?.getString("result") ?: return@withContext emptyList()
+            val ja = JSONArray(jsonStr)
+            val list = mutableListOf<PluginSubtitle>()
+            for (i in 0 until ja.length()) {
+                val so = ja.optJSONObject(i) ?: continue
+                val url = so.optString("url").trim()
+                if (url.isBlank()) continue
+                list.add(
+                    PluginSubtitle(
+                        lang = so.optString("lang", "English"),
+                        url = url,
+                        isDefault = so.optBoolean("default", false)
+                    )
+                )
+            }
+            list
+        } catch (e: Exception) {
+            Log.w(TAG, "getOnlineSubtitles error on authority=$authority: ${e.message}")
+            emptyList()
         }
     }
 }

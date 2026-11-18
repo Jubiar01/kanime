@@ -3,6 +3,8 @@ package com.kanime.app.ui.screens
 import android.content.res.Configuration
 import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -31,9 +33,11 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayCircleOutline
+import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -48,21 +52,24 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kanime.app.R
 import com.kanime.app.data.api.CatalogConfig
 import com.kanime.app.data.plugin.PluginManager
@@ -74,6 +81,7 @@ import com.kanime.app.ui.theme.KanimeAmbientBackdrop
 import com.kanime.app.ui.theme.KanimeSpacing
 import com.kanime.app.ui.theme.KanimeWindowWidthSizeClass
 import com.kanime.app.ui.theme.LocalWindowSizeClass
+import com.kanime.app.ui.theme.OnboardingPreferences
 import com.kanime.app.ui.theme.PillShape
 import com.kanime.app.ui.theme.ThemeMode
 import com.kanime.app.ui.theme.ThemePreferences
@@ -88,21 +96,36 @@ fun SettingsScreen(
     bottomContentPadding: Dp = KanimeSpacing.floatingBarClearance
 ) {
     val context = LocalContext.current
-    val plugins by PluginManager.plugins.collectAsState()
-    val themeMode by ThemePreferences.themeModeFlow.collectAsState()
-    val dynamicColor by ThemePreferences.dynamicColorFlow.collectAsState()
-    val tmdbApiKey by CatalogConfig.tmdbApiKeyFlow.collectAsState()
-    val autoPlayNext by CatalogConfig.autoPlayNextFlow.collectAsState()
-    val animeUpscaleEnabled by CatalogConfig.animeUpscaleEnabledFlow.collectAsState()
-    val lineSharpeningEnabled by CatalogConfig.animeLineSharpeningFlow.collectAsState()
-    val animeUpscaleQuality by CatalogConfig.animeUpscaleQualityFlow.collectAsState()
-    val animeSharpenStrength by CatalogConfig.animeSharpenStrengthFlow.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
+    val plugins by PluginManager.plugins.collectAsStateWithLifecycle()
+    val pluginFolderUri by PluginManager.pluginFolderUriFlow.collectAsStateWithLifecycle()
+    val pluginFolderName = remember(pluginFolderUri) {
+        PluginManager.getPluginFolderDisplayName(context, pluginFolderUri)
+    }
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri ->
+        if (treeUri != null) {
+            PluginManager.setPluginFolderUri(context, treeUri)
+            coroutineScope.launch {
+                PluginManager.checkPluginStatusAsync(context, force = true)
+            }
+        }
+    }
+    val themeMode by ThemePreferences.themeModeFlow.collectAsStateWithLifecycle()
+    val dynamicColor by ThemePreferences.dynamicColorFlow.collectAsStateWithLifecycle()
+    val tmdbApiKey by CatalogConfig.tmdbApiKeyFlow.collectAsStateWithLifecycle()
+    val autoPlayNext by CatalogConfig.autoPlayNextFlow.collectAsStateWithLifecycle()
+    val animeUpscaleEnabled by CatalogConfig.animeUpscaleEnabledFlow.collectAsStateWithLifecycle()
+    val lineSharpeningEnabled by CatalogConfig.animeLineSharpeningFlow.collectAsStateWithLifecycle()
+    val animeUpscaleQuality by CatalogConfig.animeUpscaleQualityFlow.collectAsStateWithLifecycle()
+    val animeSharpenStrength by CatalogConfig.animeSharpenStrengthFlow.collectAsStateWithLifecycle()
 
-    val activePluginCount = plugins.count { it.isInstalled && it.isEnabled }
-    val pluginUpdateCount = plugins.count { it.hasUpdate }
+    val activePluginCount = remember(plugins) { plugins.count { it.isInstalled && it.isEnabled } }
+    val pluginUpdateCount = remember(plugins) { plugins.count { it.hasUpdate } }
 
     LaunchedEffect(Unit) {
-        PluginManager.checkPluginStatus(context)
+        PluginManager.checkPluginStatusAsync(context)
     }
 
     var showPluginsView by remember { mutableStateOf(false) }
@@ -119,6 +142,7 @@ fun SettingsScreen(
         supportsDynamicColor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
         activePluginCount = activePluginCount,
         pluginUpdateCount = pluginUpdateCount,
+        pluginFolderName = pluginFolderName,
         autoPlayNext = autoPlayNext,
         animeUpscaleEnabled = animeUpscaleEnabled,
         animeUpscaleQuality = animeUpscaleQuality,
@@ -128,6 +152,8 @@ fun SettingsScreen(
         onThemeModeChange = { ThemePreferences.setThemeMode(context, it) },
         onDynamicColorChange = { ThemePreferences.setDynamicColor(context, it) },
         onOpenPlugins = { showPluginsView = true },
+        onChoosePluginFolder = { folderPickerLauncher.launch(null) },
+        onOpenSetup = { OnboardingPreferences.reset(context) },
         onAutoPlayNextChange = { viewModel.setAutoPlayNext(it) },
         onUpscaleEnabledChange = { viewModel.setAnimeUpscaleEnabled(it) },
         onUpscaleQualityChange = { viewModel.setAnimeUpscaleQuality(it) },
@@ -147,6 +173,7 @@ internal fun SettingsScreenContent(
     supportsDynamicColor: Boolean,
     activePluginCount: Int,
     pluginUpdateCount: Int,
+    pluginFolderName: String?,
     autoPlayNext: Boolean,
     animeUpscaleEnabled: Boolean,
     animeUpscaleQuality: AnimeUpscaleQuality,
@@ -156,6 +183,8 @@ internal fun SettingsScreenContent(
     onThemeModeChange: (ThemeMode) -> Unit,
     onDynamicColorChange: (Boolean) -> Unit,
     onOpenPlugins: () -> Unit,
+    onChoosePluginFolder: () -> Unit,
+    onOpenSetup: () -> Unit,
     onAutoPlayNextChange: (Boolean) -> Unit,
     onUpscaleEnabledChange: (Boolean) -> Unit,
     onUpscaleQualityChange: (AnimeUpscaleQuality) -> Unit,
@@ -285,7 +314,7 @@ internal fun SettingsScreenContent(
                                         shape = PillShape
                                     ) {
                                         Text(
-                                            text = stringResource(R.string.plugins_updates_available, pluginUpdateCount),
+                                            text = pluralStringResource(R.plurals.plugins_updates_count, pluginUpdateCount, pluginUpdateCount),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onTertiaryContainer,
                                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
@@ -325,12 +354,96 @@ internal fun SettingsScreenContent(
 
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
+                        // SAF Plugin Folder row
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = KanimeSpacing.minTouchTarget)
+                                .clickable(onClick = onChoosePluginFolder),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FolderOpen,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(KanimeSpacing.md))
+                                Column {
+                                    Text(
+                                        text = stringResource(R.string.settings_plugin_folder),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = pluginFolderName ?: stringResource(R.string.settings_plugin_folder_default),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
                         SettingsSwitchRow(
                             icon = Icons.Default.PlayCircleOutline,
                             title = stringResource(R.string.settings_autoplay),
                             checked = autoPlayNext,
                             onCheckedChange = onAutoPlayNextChange
                         )
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                        // Re-open Onboarding Setup row
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = KanimeSpacing.minTouchTarget)
+                                .clickable(onClick = onOpenSetup),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.RocketLaunch,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(KanimeSpacing.md))
+                                Column {
+                                    Text(
+                                        text = stringResource(R.string.settings_setup),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.settings_setup_desc),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -686,6 +799,7 @@ private fun SettingsScreenPreview() {
                 supportsDynamicColor = true,
                 activePluginCount = 1,
                 pluginUpdateCount = 0,
+                pluginFolderName = "Download/Kanime",
                 autoPlayNext = true,
                 animeUpscaleEnabled = false,
                 animeUpscaleQuality = AnimeUpscaleQuality.AUTO,
@@ -695,6 +809,8 @@ private fun SettingsScreenPreview() {
                 onThemeModeChange = {},
                 onDynamicColorChange = {},
                 onOpenPlugins = {},
+                onChoosePluginFolder = {},
+                onOpenSetup = {},
                 onAutoPlayNextChange = {},
                 onUpscaleEnabledChange = {},
                 onUpscaleQualityChange = {},

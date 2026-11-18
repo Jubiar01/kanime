@@ -69,7 +69,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -79,6 +79,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -90,6 +91,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.lazy.rememberLazyListState
 import coil3.compose.AsyncImage
 import com.kanime.app.R
 import com.kanime.app.data.model.Anime
@@ -163,8 +166,9 @@ fun DetailScreen(
     val coroutineScope = rememberCoroutineScope()
 
     var pluginEpisodes by remember(anime.id) { mutableStateOf<List<Episode>?>(null) }
-    val availablePlugins by PluginManager.plugins.collectAsState()
-    val activeSourceId by PluginManager.activeSourceId.collectAsState()
+    val allPlugins by PluginManager.plugins.collectAsStateWithLifecycle()
+    val availablePlugins = remember(allPlugins) { allPlugins.filter { it.isVideoPlugin } }
+    val activeSourceId by PluginManager.activeSourceId.collectAsStateWithLifecycle()
 
     val activePlugin = remember(availablePlugins, activeSourceId) {
         availablePlugins.firstOrNull { it.id == activeSourceId }
@@ -397,13 +401,13 @@ fun DetailScreen(
         onPlayEpisode = { ep -> viewModel.playEpisode(animeForPlayback, ep) },
         onSwitchPlugin = { plugin ->
             if (!plugin.isInstalled) {
-                Toast.makeText(context, "${plugin.name} is not installed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.plugins_msg_not_installed, plugin.name), Toast.LENGTH_SHORT).show()
             } else if (!plugin.isEnabled) {
-                Toast.makeText(context, "${plugin.name} is disabled", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.plugins_msg_disabled, plugin.name), Toast.LENGTH_SHORT).show()
             } else {
                 PluginManager.setActiveSource(plugin.id)
                 showSourceSheet = false
-                Toast.makeText(context, "Source: ${plugin.name}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.plugins_msg_source_switched, plugin.name), Toast.LENGTH_SHORT).show()
             }
         },
         onOpenCharacter = { viewModel.openCharacter(it) },
@@ -448,6 +452,14 @@ internal fun DetailScreenContent(
 ) {
     val windowSize = LocalWindowSizeClass.current
     var isSynopsisExpanded by remember(anime.id) { mutableStateOf(false) }
+    val compactListState = rememberLazyListState()
+    val topBarScrimAlpha = remember(compactListState) {
+        derivedStateOf {
+            if (compactListState.firstVisibleItemIndex > 0) 0.92f
+            else (compactListState.firstVisibleItemScrollOffset / 360f).coerceIn(0f, 0.92f)
+        }
+    }
+    val topBarBgColor = MaterialTheme.colorScheme.background
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (windowSize.useTwoPaneDetail) {
@@ -522,14 +534,15 @@ internal fun DetailScreenContent(
         } else {
             // Single-column Compact phone layout
             LazyColumn(
+                state = compactListState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 56.dp)
             ) {
-                item(key = "header") {
+                item(key = "header", contentType = "backdrop") {
                     DetailFullBleedBackdrop(anime = anime)
                 }
 
-                item(key = "meta") {
+                item(key = "meta", contentType = "meta") {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -578,10 +591,16 @@ internal fun DetailScreenContent(
             }
         }
 
-        // Sticky Floating Glass Action Top Bar
+        // Sticky Floating Glass Action Top Bar (scroll alpha read in drawBehind — zero scroll recomposition)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .drawBehind {
+                    val a = topBarScrimAlpha.value
+                    if (a > 0.01f) {
+                        drawRect(color = topBarBgColor.copy(alpha = a))
+                    }
+                }
                 .statusBarsPadding()
                 .displayCutoutPadding()
                 .padding(horizontal = KanimeSpacing.lg, vertical = KanimeSpacing.sm)
@@ -1004,7 +1023,7 @@ private fun LazyListScope.detailTabItems(
             }
 
             is SourceAvailabilityState.Available -> {
-                items(displayEpisodes, key = { "${it.id}_${it.episodeNumber}" }) { episode ->
+                items(displayEpisodes, key = { "${it.id}_${it.episodeNumber}" }, contentType = { "episode_card" }) { episode ->
                     Box(modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 5.dp)) {
                         EpisodeCard(
                             episode = episode,
@@ -1099,7 +1118,7 @@ private fun LazyListScope.detailTabItems(
                 )
             }
         } else {
-            items(extras.characters, key = { it.characterId ?: it.name.hashCode() }) { character ->
+            items(extras.characters, key = { it.characterId ?: it.name.hashCode() }, contentType = { "character_row" }) { character ->
                 Box(modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 5.dp)) {
                     CharacterRowCard(
                         character = character,

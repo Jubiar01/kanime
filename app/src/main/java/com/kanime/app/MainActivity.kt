@@ -13,20 +13,18 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.DarkMode
@@ -43,7 +41,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -58,6 +55,8 @@ import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import com.kanime.app.data.api.CatalogConfig
 import com.kanime.app.data.api.WatchHistoryStore
 import com.kanime.app.data.plugin.PluginManager
@@ -68,20 +67,26 @@ import com.kanime.app.ui.components.GlassTopBar
 import com.kanime.app.ui.screens.DetailScreen
 import com.kanime.app.ui.screens.ExploreScreen
 import com.kanime.app.ui.screens.HomeScreen
+import com.kanime.app.ui.screens.OnboardingScreen
 import com.kanime.app.ui.screens.PlayerDialog
 import com.kanime.app.ui.screens.SettingsScreen
 import com.kanime.app.ui.screens.WatchlistScreen
 import com.kanime.app.ui.theme.KAnimeTheme
 import com.kanime.app.ui.theme.KanimeAmbientBackdrop
+import com.kanime.app.ui.theme.KanimeImageLoader
+import com.kanime.app.ui.theme.KanimeMotion
 import com.kanime.app.ui.theme.LocalWindowSizeClass
+import com.kanime.app.ui.theme.OnboardingPreferences
 import com.kanime.app.ui.theme.ThemeMode
 import com.kanime.app.ui.theme.ThemePreferences
+import com.kanime.app.ui.theme.rememberReduceMotion
 import com.kanime.app.ui.viewmodel.AnimeUiState
 import com.kanime.app.ui.viewmodel.AnimeViewModel
 import com.kanime.app.ui.viewmodel.NavTab
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -95,7 +100,9 @@ class MainActivity : ComponentActivity() {
 
     private val packageChangeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            PluginManager.checkPluginStatus(applicationContext)
+            lifecycleScope.launch {
+                PluginManager.checkPluginStatusAsync(applicationContext, force = true)
+            }
         }
     }
 
@@ -103,11 +110,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Initialize persisted preferences, catalog config, watchlist/history & plugin status sync
+        // Initialize fast SharedPreferences flags & Coil singleton before first frame (zero flash)
+        KanimeImageLoader.init(applicationContext)
         ThemePreferences.init(applicationContext)
+        OnboardingPreferences.init(applicationContext)
         CatalogConfig.init(applicationContext)
         WatchHistoryStore.init(applicationContext)
-        PluginManager.checkPluginStatus(applicationContext)
+
+        // Offload PackageManager + filesystem plugin inspection off the main thread
+        lifecycleScope.launch {
+            PluginManager.checkPluginStatusAsync(applicationContext, force = true)
+        }
 
         // Listen for real-time APK install / uninstall / update events
         val packageFilter = IntentFilter().apply {
@@ -125,10 +138,11 @@ class MainActivity : ComponentActivity() {
         )
 
         setContent {
-            val uiState by viewModel.uiState.collectAsState()
-            val isInPipMode by isInPipModeFlow.collectAsState()
-            val themeMode by ThemePreferences.themeModeFlow.collectAsState()
-            val dynamicColor by ThemePreferences.dynamicColorFlow.collectAsState()
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val isInPipMode by isInPipModeFlow.collectAsStateWithLifecycle()
+            val themeMode by ThemePreferences.themeModeFlow.collectAsStateWithLifecycle()
+            val dynamicColor by ThemePreferences.dynamicColorFlow.collectAsStateWithLifecycle()
+            val onboardingCompleted by OnboardingPreferences.isCompletedFlow.collectAsStateWithLifecycle()
             val systemDark = isSystemInDarkTheme()
 
             val resolvedDarkTheme = when (themeMode) {
@@ -141,13 +155,19 @@ class MainActivity : ComponentActivity() {
                 darkTheme = resolvedDarkTheme,
                 dynamicColor = dynamicColor
             ) {
-                KAnimeApp(
-                    viewModel = viewModel,
-                    uiState = uiState,
-                    isDarkTheme = resolvedDarkTheme,
-                    dynamicColor = dynamicColor,
-                    isInPipMode = isInPipMode
-                )
+                if (!onboardingCompleted) {
+                    OnboardingScreen(
+                        onFinished = { OnboardingPreferences.markCompleted(applicationContext) }
+                    )
+                } else {
+                    KAnimeApp(
+                        viewModel = viewModel,
+                        uiState = uiState,
+                        isDarkTheme = resolvedDarkTheme,
+                        dynamicColor = dynamicColor,
+                        isInPipMode = isInPipMode
+                    )
+                }
             }
         }
     }
@@ -172,7 +192,9 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             _isInPipMode.value = isInPictureInPictureMode
         }
-        PluginManager.checkPluginStatus(applicationContext)
+        lifecycleScope.launch {
+            PluginManager.checkPluginStatusAsync(applicationContext)
+        }
     }
 
     override fun onDestroy() {
@@ -192,7 +214,8 @@ fun KAnimeApp(
     isInPipMode: Boolean = false
 ) {
     val context = LocalContext.current
-    val autoPlayNext by CatalogConfig.autoPlayNextFlow.collectAsState()
+    val reduceMotion = rememberReduceMotion()
+    val autoPlayNext by CatalogConfig.autoPlayNextFlow.collectAsStateWithLifecycle()
     val playing = uiState.playingEpisode
 
     // Full-screen player is always presented in dark theme regardless of app theme,
@@ -257,7 +280,8 @@ fun KAnimeApp(
             AnimatedContent(
                 targetState = uiState.currentTab,
                 transitionSpec = {
-                    fadeIn(tween(180)) togetherWith fadeOut(tween(140))
+                    fadeIn(KanimeMotion.fadeInTween(reduceMotion)) togetherWith
+                        fadeOut(KanimeMotion.fadeOutTween(reduceMotion))
                 },
                 label = "TabContent",
                 modifier = Modifier.fillMaxSize()

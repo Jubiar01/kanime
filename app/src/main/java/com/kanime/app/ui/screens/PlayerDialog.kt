@@ -72,6 +72,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -96,6 +97,8 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import java.util.Locale
+import androidx.compose.ui.res.stringResource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -103,6 +106,7 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
+import com.kanime.app.R
 import com.kanime.app.data.api.AniSkipApi
 import com.kanime.app.data.api.CatalogConfig
 import com.kanime.app.data.api.EpisodeSkipTimes
@@ -113,12 +117,14 @@ import com.kanime.app.data.plugin.PluginBridge
 import com.kanime.app.data.plugin.PluginManager
 import com.kanime.app.data.plugin.PluginServer
 import com.kanime.app.data.plugin.PluginStream
+import com.kanime.app.data.plugin.PluginSubtitle
 import com.kanime.app.ui.player.CaptionBackground
 import com.kanime.app.ui.player.CaptionColor
 import com.kanime.app.ui.player.CaptionEdgeStyle
 import com.kanime.app.ui.player.CaptionFont
 import com.kanime.app.ui.player.CaptionPosition
 import com.kanime.app.ui.player.CaptionTextSize
+import com.kanime.app.ui.player.SubtitleOffsetHelper
 import com.kanime.app.ui.player.applyCaptionStyle
 import com.kanime.app.ui.player.anime.AnimeEnhancementStatus
 import com.kanime.app.ui.player.anime.AnimeShaderStatusTracker
@@ -140,6 +146,46 @@ sealed interface StreamResolutionState {
     data class Loading(val message: String) : StreamResolutionState
     data class Success(val stream: PluginStream) : StreamResolutionState
     data class Error(val message: String) : StreamResolutionState
+}
+
+private fun detectSubtitleMimeType(url: String): String {
+    val clean = url.substringBefore('?').substringBefore('#').lowercase(Locale.ROOT)
+    return when {
+        clean.endsWith(".m3u8") || url.contains(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
+        clean.endsWith(".vtt") -> MimeTypes.TEXT_VTT
+        clean.endsWith(".ass") || clean.endsWith(".ssa") -> MimeTypes.TEXT_SSA
+        clean.endsWith(".srt") ||
+            url.contains("opensubtitles", ignoreCase = true) ||
+            url.contains("strem.io", ignoreCase = true) ||
+            url.contains("subencoding-", ignoreCase = true) -> MimeTypes.APPLICATION_SUBRIP
+        else -> MimeTypes.TEXT_VTT
+    }
+}
+
+private fun subtitleLanguageCode(label: String): String {
+    val l = label.trim().lowercase(Locale.ROOT)
+    return when {
+        l.startsWith("eng") || l == "en" -> "en"
+        l.startsWith("spa") || l == "es" -> "es"
+        l.startsWith("por") || l == "pt" || l == "pob" -> "pt"
+        l.startsWith("fre") || l.startsWith("fra") || l == "fr" -> "fr"
+        l.startsWith("ind") || l == "id" -> "id"
+        l.startsWith("mal") || l.startsWith("msa") || l == "ms" -> "ms"
+        l.startsWith("ger") || l.startsWith("deu") || l == "de" -> "de"
+        l.startsWith("ita") || l == "it" -> "it"
+        l.startsWith("ara") || l == "ar" -> "ar"
+        l.startsWith("jap") || l.startsWith("jpn") || l == "ja" -> "ja"
+        l.startsWith("kor") || l == "ko" -> "ko"
+        l.startsWith("chi") || l.startsWith("zho") || l == "zh" -> "zh"
+        l.startsWith("vie") || l == "vi" -> "vi"
+        l.startsWith("tha") || l == "th" -> "th"
+        l.startsWith("rus") || l == "ru" -> "ru"
+        l.startsWith("tur") || l == "tr" -> "tr"
+        l.startsWith("pol") || l == "pl" -> "pl"
+        l.startsWith("dut") || l.startsWith("nld") || l == "nl" -> "nl"
+        l.startsWith("fil") || l.startsWith("tgl") || l == "tl" -> "tl"
+        else -> l.take(3).ifBlank { "en" }
+    }
 }
 
 private fun Context.findActivity(): Activity? {
@@ -236,8 +282,9 @@ fun PlayerDialog(
     val effectiveInPip = isInPipMode || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && activity?.isInPictureInPictureMode == true)
     val isLandscape = !effectiveInPip && configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    val availablePlugins by PluginManager.plugins.collectAsState()
-    val activeSourceId by PluginManager.activeSourceId.collectAsState()
+    val allPlugins by PluginManager.plugins.collectAsStateWithLifecycle()
+    val availablePlugins = remember(allPlugins) { allPlugins.filter { it.isVideoPlugin } }
+    val activeSourceId by PluginManager.activeSourceId.collectAsStateWithLifecycle()
 
     var resolutionState by remember { mutableStateOf<StreamResolutionState>(StreamResolutionState.Loading("Resolving stream via KAnikoto plugin...")) }
     var availableServers by remember { mutableStateOf<List<PluginServer>>(emptyList()) }
@@ -264,8 +311,19 @@ fun PlayerDialog(
     }
     var subtitlesEnabled by remember { mutableStateOf(true) }
     var selectedSubtitleTrack by remember { mutableStateOf("English [CC]") }
+    var embeddedTextTrackLabels by remember(anime.id, episode.episodeNumber) { mutableStateOf<List<String>>(emptyList()) }
+    val latestSubtitlesEnabled by rememberUpdatedState(subtitlesEnabled)
+    var useOpenSubtitle by remember { mutableStateOf(PluginManager.isUseOpenSubtitleInPlayer(context)) }
+    var openSubtitleTracks by remember(anime.id, episode.episodeNumber) { mutableStateOf<List<PluginSubtitle>>(emptyList()) }
+    var isLoadingOpenSubtitles by remember(anime.id, episode.episodeNumber) { mutableStateOf(false) }
+    var openSubtitleFetched by remember(anime.id, episode.episodeNumber) { mutableStateOf(false) }
+    var subtitleDelayMs by remember(anime.id, episode.episodeNumber) { mutableLongStateOf(0L) }
+    val subtitlePluginEntry = remember(allPlugins) { allPlugins.firstOrNull { it.isSubtitlePlugin } }
+    val activeSubtitlePlugin = remember(allPlugins) {
+        allPlugins.firstOrNull { it.isSubtitlePlugin && it.isInstalled && it.isEnabled }
+    }
     var subtitleSheetTab by remember { mutableIntStateOf(0) } // 0 = Tracks, 1 = Style
-    val captionStyle by CatalogConfig.captionStyleFlow.collectAsState()
+    val captionStyle by CatalogConfig.captionStyleFlow.collectAsStateWithLifecycle()
     var autoSelectStream by remember { mutableStateOf(true) }
     var extensionSearchQuery by remember { mutableStateOf("") }
     var sourceFilterTab by remember { mutableStateOf("Installed") } // "Installed" or "All Plugins"
@@ -276,10 +334,10 @@ fun PlayerDialog(
     val activePluginLabel = currentActivePlugin?.name ?: "No Plugin"
 
     // Persisted Anime4K 2x Upscaler & Line Sharpening settings
-    val animeUpscaleEnabled by CatalogConfig.animeUpscaleEnabledFlow.collectAsState()
-    val lineSharpeningEnabled by CatalogConfig.animeLineSharpeningFlow.collectAsState()
-    val animeUpscaleQuality by CatalogConfig.animeUpscaleQualityFlow.collectAsState()
-    val animeSharpenStrength by CatalogConfig.animeSharpenStrengthFlow.collectAsState()
+    val animeUpscaleEnabled by CatalogConfig.animeUpscaleEnabledFlow.collectAsStateWithLifecycle()
+    val lineSharpeningEnabled by CatalogConfig.animeLineSharpeningFlow.collectAsStateWithLifecycle()
+    val animeUpscaleQuality by CatalogConfig.animeUpscaleQualityFlow.collectAsStateWithLifecycle()
+    val animeSharpenStrength by CatalogConfig.animeSharpenStrengthFlow.collectAsStateWithLifecycle()
     var animeEnhancementStatus by remember { mutableStateOf<AnimeEnhancementStatus?>(null) }
     val isVideoEnhanced = animeUpscaleEnabled || lineSharpeningEnabled
     val qualityBadgeText = animeEnhancementStatus?.badgeLabel() ?: when {
@@ -330,9 +388,10 @@ fun PlayerDialog(
     val latestOnSaveProgress by rememberUpdatedState(onSaveProgress)
 
     // AniSkip Intro / Recap / Outro timestamps matched to the exact stream duration
+    // derivedStateOf ensures playback position ticks only recompose when a segment starts/ends
     var skipTimes by remember(anime.id, episode.episodeNumber) { mutableStateOf(EpisodeSkipTimes()) }
-    val activeSkipSegment = remember(skipTimes, currentPositionMs) {
-        skipTimes.activeSegmentAt(currentPositionMs)
+    val activeSkipSegment by remember(anime.id, episode.episodeNumber) {
+        derivedStateOf { skipTimes.activeSegmentAt(currentPositionMs) }
     }
 
     // Audio & Brightness Gestures (Image 6)
@@ -408,9 +467,10 @@ fun PlayerDialog(
     fun resolveStream(serverToUse: PluginServer? = null) {
         coroutineScope.launch {
             PluginManager.checkPluginStatus(context)
-            val activePlugin = PluginManager.plugins.value.firstOrNull { it.id == activeSourceId }
-                ?: PluginManager.plugins.value.firstOrNull { it.isInstalled && it.isEnabled }
-                ?: PluginManager.plugins.value.firstOrNull()
+            val videoPlugins = PluginManager.plugins.value.filter { it.isVideoPlugin }
+            val activePlugin = videoPlugins.firstOrNull { it.id == activeSourceId }
+                ?: videoPlugins.firstOrNull { it.isInstalled && it.isEnabled }
+                ?: videoPlugins.firstOrNull()
 
             if (activePlugin == null || !activePlugin.isInstalled) {
                 resolutionState = StreamResolutionState.Error(
@@ -523,6 +583,47 @@ fun PlayerDialog(
         resolveStream()
     }
 
+    // Fetch online subtitles asynchronously in the background when "Use KOpenSubtitle" is enabled
+    // so video startup is never delayed and KOpenSubtitle works with ANY video source plugin.
+    LaunchedEffect(anime.id, episode.episodeNumber, useOpenSubtitle, activeSubtitlePlugin?.providerAuthority) {
+        val subPlugin = activeSubtitlePlugin
+        if (!useOpenSubtitle || subPlugin == null) return@LaunchedEffect
+        if (openSubtitleFetched) {
+            if (openSubtitleTracks.isNotEmpty() && subtitlesEnabled) {
+                val hasCurrentOpenSub = openSubtitleTracks.any { it.lang.equals(selectedSubtitleTrack, ignoreCase = true) }
+                if (!hasCurrentOpenSub) {
+                    selectedSubtitleTrack = (openSubtitleTracks.firstOrNull { it.isDefault } ?: openSubtitleTracks.first()).lang
+                }
+            }
+            return@LaunchedEffect
+        }
+        isLoadingOpenSubtitles = true
+        try {
+            val fetched = PluginBridge.getOnlineSubtitles(
+                context = context,
+                title = anime.title,
+                episode = episode.episodeNumber,
+                englishTitle = anime.englishTitle,
+                romajiTitle = anime.romajiTitle,
+                year = anime.year,
+                malId = anime.malId,
+                anilistId = anime.anilistId,
+                kitsuId = anime.kitsuId,
+                mediaType = anime.type,
+                episodeTitle = episode.title,
+                episodeAired = episode.aired,
+                authority = subPlugin.providerAuthority
+            )
+            openSubtitleTracks = fetched
+            openSubtitleFetched = true
+            if (fetched.isNotEmpty() && subtitlesEnabled) {
+                selectedSubtitleTrack = (fetched.firstOrNull { it.isDefault } ?: fetched.first()).lang
+            }
+        } finally {
+            isLoadingOpenSubtitles = false
+        }
+    }
+
     // Native back press handling: in landscape, rotate back to portrait first; in portrait, close player
     BackHandler {
         if (isLandscape) {
@@ -601,7 +702,7 @@ fun PlayerDialog(
         }
     }
 
-    val dynamicColor by ThemePreferences.dynamicColorFlow.collectAsState()
+    val dynamicColor by ThemePreferences.dynamicColorFlow.collectAsStateWithLifecycle()
 
     KAnimeTheme(
         darkTheme = true,
@@ -771,30 +872,31 @@ fun PlayerDialog(
                             )
                         )
 
-                    val validSubtitles = stream.subtitles.filter { sub ->
+                    val validSourceSubtitles = stream.subtitles.filter { sub ->
+                        sub.url.isNotBlank() &&
                         !sub.url.contains("thumbnails", ignoreCase = true) &&
                         !sub.lang.contains("thumbnail", ignoreCase = true) &&
                         !sub.lang.contains("unknown", ignoreCase = true)
                     }
+                    val initialSubtitles = if (useOpenSubtitle && activeSubtitlePlugin != null && openSubtitleTracks.isNotEmpty()) {
+                        (openSubtitleTracks + validSourceSubtitles).distinctBy { it.url }
+                    } else {
+                        validSourceSubtitles
+                    }
 
-                    val subtitleConfigs = validSubtitles.map { sub ->
-                        val langCode = when {
-                            sub.lang.startsWith("Eng", ignoreCase = true) -> "en"
-                            sub.lang.startsWith("Spa", ignoreCase = true) -> "es"
-                            sub.lang.startsWith("Por", ignoreCase = true) -> "pt"
-                            sub.lang.startsWith("Fre", ignoreCase = true) -> "fr"
-                            else -> sub.lang.lowercase().take(3)
-                        }
+                    val subtitleConfigs = initialSubtitles.map { sub ->
+                        val langCode = subtitleLanguageCode(sub.lang)
                         MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
-                            .setMimeType(if (sub.url.contains(".m3u8")) MimeTypes.APPLICATION_M3U8 else MimeTypes.TEXT_VTT)
+                            .setMimeType(detectSubtitleMimeType(sub.url))
                             .setLanguage(langCode)
                             .setLabel(sub.lang)
                             .setSelectionFlags(if (sub.isDefault || langCode == "en") C.SELECTION_FLAG_DEFAULT else 0)
                             .build()
                     }
 
+                    val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
                     val mediaSourceFactory = DefaultMediaSourceFactory(context)
-                        .setDataSourceFactory(httpDataSourceFactory)
+                        .setDataSourceFactory(dataSourceFactory)
 
                     val trackSelector = DefaultTrackSelector(context).apply {
                         setParameters(
@@ -872,6 +974,36 @@ fun PlayerDialog(
                                     if (active != null) {
                                         selectedEmbeddedAudioKey = active.key
                                     }
+
+                                    // Discover embedded soft subtitle tracks (e.g. MP4 tx3g/mov_text/WebVTT)
+                                    val textLabels = mutableListOf<String>()
+                                    for (group in tracks.groups) {
+                                        if (group.type == C.TRACK_TYPE_TEXT) {
+                                            val tg = group.mediaTrackGroup
+                                            for (i in 0 until tg.length) {
+                                                val fmt = tg.getFormat(i)
+                                                val lbl = fmt.label?.takeIf { it.isNotBlank() }
+                                                    ?: fmt.language?.takeIf { it.isNotBlank() && it != "und" }?.let { audioTypeShortLanguage(it) }
+                                                    ?: "Embedded Subtitles"
+                                                if (!textLabels.contains(lbl)) textLabels.add(lbl)
+                                            }
+                                        }
+                                    }
+                                    embeddedTextTrackLabels = textLabels
+
+                                    // Re-enforce disabled state if text tracks arrived after initial prepare
+                                    if (!latestSubtitlesEnabled) {
+                                        val p = trackSelectionParameters.buildUpon()
+                                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                                            .setIgnoredTextSelectionFlags(
+                                                C.SELECTION_FLAG_FORCED or C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_AUTOSELECT
+                                            )
+                                            .build()
+                                        if (trackSelectionParameters != p) {
+                                            trackSelectionParameters = p
+                                        }
+                                    }
                                 }
 
                                 override fun onPlayerError(error: PlaybackException) {
@@ -900,6 +1032,70 @@ fun PlayerDialog(
                                 }
                             })
                         }
+                }
+
+                // Dynamically attach/detach KOpenSubtitle tracks & apply real-time subtitle sync offset
+                // in-place on the existing ExoPlayer without recreating shaders or losing playback position.
+                val effectiveOpenSubsActive = useOpenSubtitle && activeSubtitlePlugin != null
+                val activeDelayTrackKey = if (subtitleDelayMs != 0L) selectedSubtitleTrack else ""
+                val currentSubSignature = remember(effectiveOpenSubsActive, openSubtitleTracks, subtitleDelayMs, activeDelayTrackKey) {
+                    val urls = if (effectiveOpenSubsActive) openSubtitleTracks.joinToString("|") { it.url } else ""
+                    "$effectiveOpenSubsActive::$urls::$subtitleDelayMs::$activeDelayTrackKey"
+                }
+                val appliedSubSignatureRef = remember(exoPlayer) {
+                    val initUrls = if (effectiveOpenSubsActive) openSubtitleTracks.joinToString("|") { it.url } else ""
+                    mutableStateOf("$effectiveOpenSubsActive::$initUrls::0::")
+                }
+
+                LaunchedEffect(exoPlayer, streamUrl, currentSubSignature) {
+                    if (currentSubSignature == appliedSubSignatureRef.value) return@LaunchedEffect
+                    val validSourceSubtitles = stream.subtitles.filter { sub ->
+                        sub.url.isNotBlank() &&
+                            !sub.url.contains("thumbnails", ignoreCase = true) &&
+                            !sub.lang.contains("thumbnail", ignoreCase = true) &&
+                            !sub.lang.contains("unknown", ignoreCase = true)
+                    }
+                    val mergedSubtitles = if (effectiveOpenSubsActive && openSubtitleTracks.isNotEmpty()) {
+                        (openSubtitleTracks + validSourceSubtitles).distinctBy { it.url }
+                    } else {
+                        validSourceSubtitles
+                    }
+                    val targetShiftTrack = mergedSubtitles.firstOrNull {
+                        it.lang.equals(selectedSubtitleTrack, ignoreCase = true)
+                    } ?: mergedSubtitles.firstOrNull { it.isDefault } ?: mergedSubtitles.firstOrNull()
+
+                    val updatedConfigs = mergedSubtitles.map { sub ->
+                        val langCode = subtitleLanguageCode(sub.lang)
+                        val subUri = if (subtitleDelayMs != 0L && sub == targetShiftTrack) {
+                            SubtitleOffsetHelper.resolveOffsetSubtitleUri(
+                                context = context,
+                                url = sub.url,
+                                referer = stream.referer,
+                                offsetMs = subtitleDelayMs
+                            )
+                        } else {
+                            Uri.parse(sub.url)
+                        }
+                        MediaItem.SubtitleConfiguration.Builder(subUri)
+                            .setMimeType(detectSubtitleMimeType(sub.url))
+                            .setLanguage(langCode)
+                            .setLabel(sub.lang)
+                            .setSelectionFlags(if (sub.isDefault || langCode == "en") C.SELECTION_FLAG_DEFAULT else 0)
+                            .build()
+                    }
+
+                    val updatedMediaItem = MediaItem.Builder()
+                        .setUri(Uri.parse(streamUrl))
+                        .setMimeType(if (streamUrl.contains(".m3u8")) MimeTypes.APPLICATION_M3U8 else null)
+                        .setSubtitleConfigurations(updatedConfigs)
+                        .build()
+
+                    val savedPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                    val wasPlaying = exoPlayer.playWhenReady || exoPlayer.isPlaying
+                    exoPlayer.setMediaItem(updatedMediaItem, savedPos)
+                    exoPlayer.prepare()
+                    exoPlayer.playWhenReady = wasPlaying
+                    appliedSubSignatureRef.value = currentSubSignature
                 }
 
                 // Debounced clean ExoPlayer rebuild when Anime4K toggles, quality preset, or sharpen strength change
@@ -1138,37 +1334,50 @@ fun PlayerDialog(
                     pendingAudioTrackSelection = null
                 }
 
-                // Subtitle track selection
-                LaunchedEffect(exoPlayer, subtitlesEnabled, selectedSubtitleTrack) {
+                // Subtitle track selection (clears overrides & forced flags when disabled so MP4/HLS captions turn off cleanly)
+                LaunchedEffect(exoPlayer, subtitlesEnabled, selectedSubtitleTrack, embeddedTextTrackLabels) {
                     val builder = exoPlayer.trackSelectionParameters.buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                     if (!subtitlesEnabled || selectedSubtitleTrack == "Off") {
-                        builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        builder
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                            .setIgnoredTextSelectionFlags(
+                                C.SELECTION_FLAG_FORCED or C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_AUTOSELECT
+                            )
                     } else {
-                        builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                        val targetLang = when {
-                            selectedSubtitleTrack.startsWith("Eng", ignoreCase = true) -> "en"
-                            selectedSubtitleTrack.startsWith("Spa", ignoreCase = true) -> "es"
-                            selectedSubtitleTrack.startsWith("Por", ignoreCase = true) -> "pt"
-                            selectedSubtitleTrack.startsWith("Fre", ignoreCase = true) -> "fr"
-                            else -> selectedSubtitleTrack.lowercase().take(3)
-                        }
+                        builder
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                            .setIgnoredTextSelectionFlags(0)
+                        val targetLang = subtitleLanguageCode(selectedSubtitleTrack)
                         builder.setPreferredTextLanguage(targetLang)
                         builder.setSelectUndeterminedTextLanguage(true)
 
+                        var exactMatch: Pair<TrackGroup, Int>? = null
+                        var fallbackMatch: Pair<TrackGroup, Int>? = null
                         for (group in exoPlayer.currentTracks.groups) {
                             if (group.type == C.TRACK_TYPE_TEXT) {
                                 val trackGroup = group.mediaTrackGroup
                                 for (i in 0 until trackGroup.length) {
                                     val format = trackGroup.getFormat(i)
-                                    val label = format.label ?: format.language ?: ""
-                                    if (label.contains(selectedSubtitleTrack, ignoreCase = true) ||
-                                        (selectedSubtitleTrack.startsWith("Eng", ignoreCase = true) && (format.language == "en" || format.language == "eng"))
-                                    ) {
-                                        builder.setOverrideForType(TrackSelectionOverride(trackGroup, i))
+                                    val label = format.label ?: format.language ?: "Embedded Subtitles"
+                                    if (label.equals(selectedSubtitleTrack, ignoreCase = true)) {
+                                        exactMatch = trackGroup to i
                                         break
                                     }
+                                    if (fallbackMatch == null && (
+                                            label.contains(selectedSubtitleTrack, ignoreCase = true) ||
+                                            selectedSubtitleTrack.equals("Embedded Subtitles", ignoreCase = true) ||
+                                            (selectedSubtitleTrack.startsWith("Eng", ignoreCase = true) && (format.language == "en" || format.language == "eng"))
+                                        )
+                                    ) {
+                                        fallbackMatch = trackGroup to i
+                                    }
                                 }
+                                if (exactMatch != null) break
                             }
+                        }
+                        (exactMatch ?: fallbackMatch)?.let { (tg, idx) ->
+                            builder.setOverrideForType(TrackSelectionOverride(tg, idx))
                         }
                     }
                     exoPlayer.trackSelectionParameters = builder.build()
@@ -1222,6 +1431,21 @@ fun PlayerDialog(
                 // Live-apply user caption customizations (font, size, color, edge, background, position)
                 LaunchedEffect(playerView, captionStyle) {
                     applyCaptionStyle(context, playerView.subtitleView, captionStyle)
+                }
+
+                // Immediately hide and clear SubtitleView cues when subtitles are toggled OFF
+                LaunchedEffect(playerView, subtitlesEnabled, selectedSubtitleTrack) {
+                    val showCaptions = subtitlesEnabled && selectedSubtitleTrack != "Off"
+                    playerView.subtitleView?.apply {
+                        if (!showCaptions) {
+                            setCues(emptyList())
+                            alpha = 0f
+                            visibility = View.GONE
+                        } else {
+                            alpha = 1f
+                            visibility = View.VISIBLE
+                        }
+                    }
                 }
 
                 // Live-apply Picture / Aspect Ratio mode directly on PlayerView & ExoPlayer
@@ -1286,6 +1510,16 @@ fun PlayerDialog(
                             },
                             update = { pv ->
                                 if (pv.player != exoPlayer) pv.player = exoPlayer
+                                val showCaptions = subtitlesEnabled && selectedSubtitleTrack != "Off"
+                                pv.subtitleView?.let { sv ->
+                                    val targetVis = if (showCaptions) View.VISIBLE else View.GONE
+                                    val targetAlpha = if (showCaptions) 1f else 0f
+                                    if (sv.visibility != targetVis || sv.alpha != targetAlpha) {
+                                        if (!showCaptions) sv.setCues(emptyList())
+                                        sv.alpha = targetAlpha
+                                        sv.visibility = targetVis
+                                    }
+                                }
                                 val targetResize = if (effectiveInPip) {
                                     AspectRatioFrameLayout.RESIZE_MODE_FIT
                                 } else {
@@ -1448,11 +1682,9 @@ fun PlayerDialog(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(
-                                                text = "${formatTime(currentPositionMs)} / ${formatTime(durationMs)}",
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Medium
+                                            PlayerTimeLabel(
+                                                positionProvider = { currentPositionMs },
+                                                durationProvider = { durationMs }
                                             )
 
                                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1484,20 +1716,11 @@ fun PlayerDialog(
                                             }
                                         }
 
-                                        Slider(
-                                            value = if (durationMs > 0) currentPositionMs.toFloat() / durationMs.toFloat() else 0f,
-                                            onValueChange = { ratio ->
-                                                val newPos = (ratio * durationMs).toLong()
-                                                exoPlayer.seekTo(newPos)
-                                            },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(20.dp),
-                                            colors = SliderDefaults.colors(
-                                                thumbColor = MaterialTheme.colorScheme.primary,
-                                                activeTrackColor = MaterialTheme.colorScheme.primary,
-                                                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
-                                            )
+                                        PlayerSeekSlider(
+                                            positionProvider = { currentPositionMs },
+                                            durationProvider = { durationMs },
+                                            onSeek = { newPos -> exoPlayer.seekTo(newPos) },
+                                            height = 20.dp
                                         )
                                     }
                                 }
@@ -2139,11 +2362,9 @@ fun PlayerDialog(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(
-                                                text = "${formatTime(currentPositionMs)} / ${formatTime(durationMs)}",
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Medium
+                                            PlayerTimeLabel(
+                                                positionProvider = { currentPositionMs },
+                                                durationProvider = { durationMs }
                                             )
 
                                             // Liquid glass +10s pill button
@@ -2178,19 +2399,12 @@ fun PlayerDialog(
 
                                         Spacer(modifier = Modifier.height(2.dp))
 
-                                        // Row 2: Full width progress slider (Image 4)
-                                        Slider(
-                                            value = if (durationMs > 0) currentPositionMs.toFloat() / durationMs.toFloat() else 0f,
-                                            onValueChange = { ratio ->
-                                                val newPos = (ratio * durationMs).toLong()
-                                                exoPlayer.seekTo(newPos)
-                                            },
-                                            modifier = Modifier.fillMaxWidth().height(26.dp),
-                                            colors = SliderDefaults.colors(
-                                                thumbColor = MaterialTheme.colorScheme.primary,
-                                                activeTrackColor = MaterialTheme.colorScheme.primary,
-                                                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
-                                            )
+                                        // Row 2: Full width progress slider (isolated recomposition scope)
+                                        PlayerSeekSlider(
+                                            positionProvider = { currentPositionMs },
+                                            durationProvider = { durationMs },
+                                            onSeek = { newPos -> exoPlayer.seekTo(newPos) },
+                                            height = 26.dp
                                         )
 
                                         // Row 3: Bottom Action Row (Image 4 & Image 6)
@@ -2706,22 +2920,209 @@ fun PlayerDialog(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                        val subOptions = mutableListOf("English [CC]", "Off")
-                        if (resolutionState is StreamResolutionState.Success) {
-                            (resolutionState as StreamResolutionState.Success).stream.subtitles
-                                .filter { sub ->
-                                    !sub.url.contains("thumbnails", ignoreCase = true) &&
+                        // Use KOpenSubtitle toggle — works across ANY video source plugin
+                        val canUseOpenSub = activeSubtitlePlugin != null
+                        val openSubStatusText = when {
+                            subtitlePluginEntry == null || !subtitlePluginEntry.isInstalled ->
+                                stringResource(R.string.player_kopensubtitle_not_installed)
+                            !subtitlePluginEntry.isEnabled ->
+                                stringResource(R.string.player_kopensubtitle_disabled)
+                            isLoadingOpenSubtitles ->
+                                stringResource(R.string.player_kopensubtitle_loading)
+                            useOpenSubtitle && openSubtitleTracks.isNotEmpty() ->
+                                stringResource(R.string.player_kopensubtitle_loaded, openSubtitleTracks.size)
+                            useOpenSubtitle && openSubtitleFetched && openSubtitleTracks.isEmpty() ->
+                                stringResource(R.string.player_kopensubtitle_empty)
+                            else ->
+                                stringResource(R.string.player_kopensubtitle_desc)
+                        }
+
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.player_use_kopensubtitle),
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        if (isLoadingOpenSubtitles) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(14.dp),
+                                                strokeWidth = 2.dp,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = openSubStatusText,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Switch(
+                                    checked = canUseOpenSub && useOpenSubtitle,
+                                    enabled = canUseOpenSub,
+                                    onCheckedChange = { enabled ->
+                                        useOpenSubtitle = enabled
+                                        PluginManager.setUseOpenSubtitleInPlayer(context, enabled)
+                                        if (enabled) {
+                                            subtitlesEnabled = true
+                                        } else {
+                                            // If an OpenSubtitles track was selected, fall back cleanly to source track
+                                            val sourceSub = (resolutionState as? StreamResolutionState.Success)
+                                                ?.stream?.subtitles
+                                                ?.firstOrNull { sub ->
+                                                    sub.url.isNotBlank() &&
+                                                        !sub.url.contains("thumbnails", ignoreCase = true) &&
+                                                        !sub.lang.contains("thumbnail", ignoreCase = true) &&
+                                                        !sub.lang.contains("unknown", ignoreCase = true)
+                                                }
+                                            if (selectedSubtitleTrack.contains("OpenSubtitles", ignoreCase = true)) {
+                                                selectedSubtitleTrack = sourceSub?.lang ?: embeddedTextTrackLabels.firstOrNull() ?: "English [CC]"
+                                            }
+                                            subtitleDelayMs = 0L
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.onSurface,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primary
+                                    )
+                                )
+                            }
+                        }
+
+                        val sourceValidSubtitles = remember(resolutionState) {
+                            (resolutionState as? StreamResolutionState.Success)?.stream?.subtitles
+                                ?.filter { sub ->
+                                    sub.url.isNotBlank() &&
+                                        !sub.url.contains("thumbnails", ignoreCase = true) &&
                                         !sub.lang.contains("thumbnail", ignoreCase = true) &&
                                         !sub.lang.contains("unknown", ignoreCase = true)
                                 }
-                                .forEach { sub ->
-                                    if (!subOptions.contains(sub.lang)) {
-                                        subOptions.add(0, sub.lang)
+                                ?: emptyList()
+                        }
+                        val hasExternalSubtitles = sourceValidSubtitles.isNotEmpty() ||
+                            (canUseOpenSub && useOpenSubtitle && openSubtitleTracks.isNotEmpty())
+
+                        // Real-time Subtitle Sync / Delay adjustment (-0.5s / +0.5s) for external tracks
+                        if (subtitlesEnabled && hasExternalSubtitles) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = stringResource(R.string.player_subtitle_sync),
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = stringResource(R.string.player_subtitle_sync_hint),
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        FilledTonalIconButton(
+                                            onClick = { subtitleDelayMs = (subtitleDelayMs - 500L).coerceAtLeast(-30_000L) },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Remove, contentDescription = "-0.5s", modifier = Modifier.size(16.dp))
+                                        }
+                                        val delaySec = subtitleDelayMs / 1000.0
+                                        val delayLabel = if (subtitleDelayMs > 0L) {
+                                            String.format(Locale.US, "+%.1fs", delaySec)
+                                        } else {
+                                            String.format(Locale.US, "%.1fs", delaySec)
+                                        }
+                                        Text(
+                                            text = delayLabel,
+                                            color = if (subtitleDelayMs != 0L) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier
+                                                .clickable(enabled = subtitleDelayMs != 0L) { subtitleDelayMs = 0L }
+                                                .padding(horizontal = 4.dp)
+                                        )
+                                        FilledTonalIconButton(
+                                            onClick = { subtitleDelayMs = (subtitleDelayMs + 500L).coerceAtMost(30_000L) },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = "+0.5s", modifier = Modifier.size(16.dp))
+                                        }
                                     }
                                 }
+                            }
                         }
+
+                        // Inform user if the video source has no removable soft subtitle tracks (e.g., AnimeHeaven hardsubs)
+                        if (sourceValidSubtitles.isEmpty() && embeddedTextTrackLabels.isEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = stringResource(R.string.player_hardsub_notice),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        val subOptions = mutableListOf<String>()
+                        if (canUseOpenSub && useOpenSubtitle) {
+                            openSubtitleTracks.forEach { sub ->
+                                if (subOptions.none { it.equals(sub.lang, ignoreCase = true) }) {
+                                    subOptions.add(sub.lang)
+                                }
+                            }
+                        }
+                        sourceValidSubtitles.forEach { sub ->
+                            if (subOptions.none { it.equals(sub.lang, ignoreCase = true) }) {
+                                subOptions.add(sub.lang)
+                            }
+                        }
+                        embeddedTextTrackLabels.forEach { lbl ->
+                            if (subOptions.none { it.equals(lbl, ignoreCase = true) }) {
+                                subOptions.add(lbl)
+                            }
+                        }
+                        if (subOptions.isEmpty()) {
+                            subOptions.add("English [CC]")
+                        }
+                        subOptions.add("Off")
 
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -4398,6 +4799,47 @@ private fun formatEpisodeHeading(episodeNumber: Int, rawTitle: String): String {
         trimmed.equals("Episode 0$episodeNumber", ignoreCase = true) ||
         trimmed.equals("Ep $episodeNumber", ignoreCase = true)
     return if (isRedundant) "Episode $episodeNumber" else "Ep $episodeNumber • $trimmed"
+}
+
+@Composable
+private fun PlayerTimeLabel(
+    positionProvider: () -> Long,
+    durationProvider: () -> Long
+) {
+    Text(
+        text = "${formatTime(positionProvider())} / ${formatTime(durationProvider())}",
+        color = MaterialTheme.colorScheme.onSurface,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Medium
+    )
+}
+
+@Composable
+private fun PlayerSeekSlider(
+    positionProvider: () -> Long,
+    durationProvider: () -> Long,
+    onSeek: (Long) -> Unit,
+    height: androidx.compose.ui.unit.Dp
+) {
+    val dur = durationProvider()
+    val pos = positionProvider()
+    Slider(
+        value = if (dur > 0L) (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f,
+        onValueChange = { ratio ->
+            val currentDur = durationProvider()
+            if (currentDur > 0L) {
+                onSeek((ratio * currentDur).toLong())
+            }
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height),
+        colors = SliderDefaults.colors(
+            thumbColor = MaterialTheme.colorScheme.primary,
+            activeTrackColor = MaterialTheme.colorScheme.primary,
+            inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
+        )
+    )
 }
 
 private fun formatTime(ms: Long): String {

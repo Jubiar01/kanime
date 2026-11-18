@@ -71,6 +71,7 @@ import com.kanime.app.ui.theme.KanimeSpacing
 import com.kanime.app.ui.theme.KanimeWindowWidthSizeClass
 import com.kanime.app.ui.theme.LocalWindowSizeClass
 import com.kanime.app.ui.theme.PillShape
+import com.kanime.app.ui.theme.rememberBoundedImageRequest
 import com.kanime.app.ui.viewmodel.AnimeUiState
 import com.kanime.app.ui.viewmodel.AnimeViewModel
 import com.kanime.app.ui.viewmodel.NavTab
@@ -222,7 +223,7 @@ internal fun WatchlistScreenContent(
                         verticalArrangement = Arrangement.spacedBy(KanimeSpacing.lg),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(watchlistAnime, key = { it.id }) { anime ->
+                        items(watchlistAnime, key = { it.id }, contentType = { "anime_card" }) { anime ->
                             AnimeCard(
                                 anime = anime,
                                 modifier = Modifier.fillMaxWidth(),
@@ -260,7 +261,7 @@ internal fun WatchlistScreenContent(
                         verticalArrangement = Arrangement.spacedBy(KanimeSpacing.md),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(historyItems, key = { "${it.anime.id}_${it.episodeNumber}" }) { entry ->
+                        items(historyItems, key = { "${it.anime.id}_${it.episodeNumber}" }, contentType = { "history_card" }) { entry ->
                             WatchHistoryCard(
                                 entry = entry,
                                 onResumeClick = { onResumeHistory(entry) },
@@ -327,8 +328,13 @@ private fun WatchHistoryCard(
                     .clip(MaterialTheme.shapes.small)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             ) {
+                val thumbRequest = rememberBoundedImageRequest(
+                    url = entry.episodeThumbnail.ifBlank { entry.anime.bannerUrl.ifBlank { entry.anime.coverUrl } },
+                    widthDp = 128.dp,
+                    heightDp = 72.dp
+                )
                 AsyncImage(
-                    model = entry.episodeThumbnail.ifBlank { entry.anime.bannerUrl.ifBlank { entry.anime.coverUrl } },
+                    model = thumbRequest,
                     contentDescription = entry.anime.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()

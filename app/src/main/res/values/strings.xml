@@ -10,6 +10,8 @@
 
     <!-- Common Actions & Accessibility -->
     <string name="action_back">Back</string>
+    <string name="action_next">Next</string>
+    <string name="action_skip">Skip</string>
     <string name="action_close">Close</string>
     <string name="action_clear">Clear</string>
     <string name="action_cancel">Cancel</string>
@@ -31,10 +33,57 @@
     <string name="action_uninstall">Uninstall</string>
     <string name="action_download">Download</string>
     <string name="action_delete">Delete</string>
+    <string name="action_open_settings">Open settings</string>
     <string name="action_switch_source">Switch Source</string>
     <string name="action_toggle_theme">Switch theme</string>
 
-    <!-- Home -->
+    <!-- Onboarding -->
+    <string name="onboarding_welcome_tagline">Minimal anime streaming, built for clarity.</string>
+    <string name="onboarding_get_started">Get started</string>
+    <string name="onboarding_appearance_title">Appearance</string>
+    <string name="onboarding_appearance_subtitle">Pick your look. Change it anytime.</string>
+    <string name="onboarding_permissions_title">Permissions</string>
+    <string name="onboarding_permissions_subtitle">Only what Kanime needs to install plugins.</string>
+    <string name="onboarding_perm_install_title">Install unknown apps</string>
+    <string name="onboarding_perm_install_reason">Required to install source plugins.</string>
+    <string name="onboarding_perm_install_legacy_hint">Enable Unknown sources in system Security settings.</string>
+    <string name="onboarding_perm_install_needed_notice">Allow plugin installs first to continue.</string>
+    <string name="onboarding_perm_grant">Allow</string>
+    <string name="onboarding_perm_status_granted">Granted</string>
+    <string name="onboarding_perm_status_needed">Needed</string>
+    <string name="onboarding_perm_status_info">Info</string>
+    <string name="onboarding_perm_offline_title">No internet connection</string>
+    <string name="onboarding_perm_offline_reason">Connect to browse anime and download plugins.</string>
+    <string name="onboarding_perm_folder_title">Plugin folder</string>
+    <string name="onboarding_perm_folder_reason">Required to save downloaded plugin APKs.</string>
+    <string name="onboarding_perm_folder_choose">Choose folder</string>
+    <string name="onboarding_perm_folder_change">Change</string>
+    <string name="onboarding_perm_folder_selected">Selected</string>
+    <string name="onboarding_perm_folder_needed">Needed</string>
+    <string name="onboarding_plugin_choose_folder_first">Choose a folder first to download plugins.</string>
+    <string name="plugins_msg_choose_folder">Choose a folder to save downloaded plugins.</string>
+    <string name="settings_plugin_folder">Plugin folder</string>
+    <string name="settings_plugin_folder_default">Not selected</string>
+    <string name="onboarding_plugin_title">Source plugins</string>
+    <string name="onboarding_plugin_subtitle">Update the catalog and install plugins to stream.</string>
+    <string name="onboarding_plugin_cta">Download &amp; install %1$s</string>
+    <string name="onboarding_plugin_install_all">Install all latest (%1$d)</string>
+    <string name="onboarding_plugin_install_ready">Install %1$s</string>
+    <string name="onboarding_plugin_installed">Installed</string>
+    <string name="onboarding_plugin_downloading">Downloading… %1$d%%</string>
+    <string name="onboarding_plugin_failed">Download failed. Check your connection.</string>
+    <string name="onboarding_catalog_checking">Checking catalog…</string>
+    <string name="onboarding_catalog_up_to_date">Catalog v%1$d · Up to date</string>
+    <string name="onboarding_catalog_update_cta">Update catalog (v%1$d → v%2$d)</string>
+    <string name="onboarding_catalog_check_failed">Couldn\'t check catalog. Tap refresh to retry.</string>
+    <string name="onboarding_done_title">All set</string>
+    <string name="onboarding_done_subtitle">You\'re ready to watch.</string>
+    <string name="onboarding_start_watching">Start watching</string>
+    <string name="onboarding_step_cd">Step %1$d of %2$d</string>
+    <string name="settings_setup">Setup</string>
+    <string name="settings_setup_desc">Run onboarding again</string>
+
+    <!-- Home & Cards -->
     <string name="home_trending">Trending</string>
     <string name="home_top_airing">Top Airing</string>
     <string name="home_seasonal">This Season</string>
@@ -42,6 +91,11 @@
     <string name="hero_save">Save</string>
     <string name="hero_saved">Saved</string>
     <string name="card_ep_count">Ep %1$d</string>
+    <string name="card_tba">TBA</string>
+    <string name="card_cd_score">score %1$s</string>
+    <string name="card_cd_episodes">%1$d episodes</string>
+    <string name="card_cd_released">released %1$s</string>
+    <string name="card_cd_airing">airing</string>
     <string name="episode_label">Ep %1$d</string>
     <string name="badge_filler">Filler</string>
     <string name="badge_recap">Recap</string>
@@ -147,8 +201,12 @@
     <string name="settings_engine">Catalog</string>
     <string name="settings_shaders">Shaders</string>
 
-    <!-- Plugins -->
+    <!-- Plugins & Release Notes -->
     <string name="plugins_title">Plugins</string>
+    <plurals name="plugins_updates_count">
+        <item quantity="one">%1$d update</item>
+        <item quantity="other">%1$d updates</item>
+    </plurals>
     <string name="plugins_updates_available">%1$d updates</string>
     <string name="plugins_update_available">Update</string>
     <string name="plugins_active">Active</string>
@@ -159,10 +217,29 @@
     <string name="plugins_configure">Configure</string>
     <string name="plugins_add_json">Add JSON</string>
     <string name="plugins_check_updates">Check updates</string>
-    <string name="plugins_release_notes">Release notes</string>
-    <string name="plugins_apply_template">Apply</string>
+    <string name="plugins_release_notes">What\'s new</string>
+    <string name="plugins_catalog_label">Catalog v%1$d</string>
+    <string name="plugins_catalog_upgrade">Catalog v%1$d → v%2$d</string>
+    <string name="plugins_section_catalog">Catalog</string>
+    <string name="plugins_section_plugins">Plugins</string>
+    <string name="plugins_version_upgrade">v%1$s → v%2$s</string>
+    <string name="plugins_no_notes">No release notes provided.</string>
+    <string name="plugins_apply_template">Apply catalog</string>
     <string name="plugins_reinstall">Reinstall</string>
     <string name="plugins_update_now">Update</string>
+    <string name="plugins_msg_up_to_date">Up to date (Catalog v%1$d)</string>
+    <string name="plugins_msg_catalog_applied">Catalog updated to v%1$d</string>
+    <string name="plugins_msg_saved">Plugin saved</string>
+    <string name="plugins_msg_invalid_json">Invalid JSON</string>
+    <string name="plugins_msg_check_failed">Couldn\'t check for updates. Try again.</string>
+    <string name="plugins_msg_offline">You\'re offline. Connect and retry.</string>
+    <string name="plugins_msg_download_failed">Download failed. Retry.</string>
+    <string name="plugins_msg_not_installed">%1$s is not installed</string>
+    <string name="plugins_msg_disabled">%1$s is disabled</string>
+    <string name="plugins_msg_source_switched">Source: %1$s</string>
+    <string name="plugins_msg_permission_required">Allow installing unknown apps to install plugins.</string>
+    <string name="plugins_msg_apk_missing">APK not found. Download it first.</string>
+    <string name="plugins_msg_apk_removed">Removed %1$s APK.</string>
 
     <!-- Player -->
     <string name="player_unavailable">Stream unavailable</string>
@@ -180,4 +257,15 @@
     <string name="player_previous">Previous</string>
     <string name="player_rewind">Rewind 10s</string>
     <string name="player_forward">Forward 10s</string>
+    <string name="player_use_kopensubtitle">Use KOpenSubtitle</string>
+    <string name="player_kopensubtitle_desc">Fetch online subtitles for any video source</string>
+    <string name="player_kopensubtitle_not_installed">Install KOpenSubtitle in Plugins to enable</string>
+    <string name="player_kopensubtitle_disabled">Turn on KOpenSubtitle in Plugins</string>
+    <string name="player_kopensubtitle_loading">Fetching online subtitles…</string>
+    <string name="player_kopensubtitle_loaded">%1$d OpenSubtitles tracks ready</string>
+    <string name="player_kopensubtitle_empty">No OpenSubtitles match found for this episode</string>
+    <string name="player_subtitle_sync">Subtitle Sync</string>
+    <string name="player_subtitle_sync_hint">Adjust if captions appear early or late</string>
+    <string name="player_subtitle_sync_reset">Reset</string>
+    <string name="player_hardsub_notice">Burned-in subtitles encoded inside the video file (common on AnimeHeaven) cannot be hidden by the player.</string>
 </resources>

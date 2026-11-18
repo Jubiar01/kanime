@@ -27,3 +27,6 @@ if (file("kanikoto-plugin").exists()) {
 if (file("kanimeheaven-plugin").exists()) {
     include(":kanimeheaven-plugin")
 }
+if (file("kopensubtitle-plugin").exists()) {
+    include(":kopensubtitle-plugin")
+}

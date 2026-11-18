@@ -72,8 +72,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -93,6 +93,7 @@ import androidx.compose.ui.unit.dp
 import com.kanime.app.ui.theme.KAnimeTheme
 import com.kanime.app.ui.theme.KanimeAmbientBackdrop
 import com.kanime.app.ui.theme.KanimeGlass
+import com.kanime.app.ui.theme.KanimeMotion
 import com.kanime.app.ui.theme.KanimeSpacing
 import com.kanime.app.ui.theme.PillShape
 
@@ -118,18 +119,16 @@ fun GlassSurface(
     val isPressed by interactionSource.collectIsPressedAsState()
     val pressScale by animateFloatAsState(
         targetValue = if (onClick != null && isPressed && enabled) 0.97f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
+        animationSpec = KanimeMotion.pressSpring(),
         label = "GlassPressScale"
     )
 
     val baseFill = when {
         overMedia -> glass.overlayFill
-        glass.useRealBlur -> glass.fill
-        else -> glass.fallbackFill
+        glass.reducedTransparency -> glass.fallbackFill
+        else -> glass.fill
     }
+    val tintColor = accentTint ?: glass.tint
 
     val shadowMod = if (showShadow) {
         Modifier.shadow(
@@ -155,6 +154,8 @@ fun GlassSurface(
         Modifier
     }
 
+    // Single draw-phase frosted surface: no wasted RenderEffect Modifier.blur on flat fills,
+    // no extra nested matchParentSize boxes.
     Box(
         modifier = modifier
             .graphicsLayer {
@@ -163,50 +164,30 @@ fun GlassSurface(
             }
             .then(shadowMod)
             .clip(shape)
+            .drawBehind {
+                drawRect(color = baseFill)
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(tintColor, tintColor.copy(alpha = tintColor.alpha * 0.25f))
+                    )
+                )
+            }
+            .drawWithContent {
+                drawContent()
+                drawLine(
+                    color = glass.topHighlight,
+                    start = Offset(size.width * 0.12f, 1.dp.toPx()),
+                    end = Offset(size.width * 0.88f, 1.dp.toPx()),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+            .border(
+                border = BorderStroke(1.dp, glass.borderBrush),
+                shape = shape
+            )
             .then(clickMod),
         contentAlignment = Alignment.Center
     ) {
-        // Layer 1: Translucent frosted backdrop (blurred on API 31+ when transparency is enabled)
-        val frostModifier = Modifier
-            .matchParentSize()
-            .background(baseFill)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        accentTint ?: glass.tint,
-                        (accentTint ?: glass.tint).copy(alpha = 0.25f)
-                    )
-                )
-            )
-            .let { mod ->
-                if (glass.useRealBlur && !overMedia) {
-                    mod.blur(glass.blurRadius)
-                } else {
-                    mod
-                }
-            }
-        Box(modifier = frostModifier)
-
-        // Layer 2: Soft top-edge inner specular highlight + 1dp directional border
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .drawWithContent {
-                    drawContent()
-                    drawLine(
-                        color = glass.topHighlight,
-                        start = Offset(size.width * 0.12f, 1.dp.toPx()),
-                        end = Offset(size.width * 0.88f, 1.dp.toPx()),
-                        strokeWidth = 1.dp.toPx()
-                    )
-                }
-                .border(
-                    border = BorderStroke(1.dp, glass.borderBrush),
-                    shape = shape
-                )
-        )
-
-        // Layer 3: Crisp foreground content
         CompositionLocalProvider(LocalContentColor provides contentColor) {
             content()
         }
@@ -813,58 +794,81 @@ fun GlassSheet(
 
 /**
  * Theme-adaptive shimmer skeleton using Material 3 surfaceContainer* roles.
+ * Reads the animated phase strictly inside [drawBehind] (draw phase only — zero
+ * composition recompositions per frame). Callers rendering multiple skeletons can
+ * share one transition via [rememberSharedShimmerPhase].
  */
 @Composable
-fun ShimmerBox(
-    modifier: Modifier = Modifier,
-    shape: Shape = MaterialTheme.shapes.medium
-) {
-    val base = MaterialTheme.colorScheme.surfaceContainerLow
-    val highlight = MaterialTheme.colorScheme.surfaceContainerHighest
-    val transition = rememberInfiniteTransition(label = "KanimeShimmer")
-    val translate by transition.animateFloat(
-        initialValue = -300f,
-        targetValue = 900f,
+fun rememberSharedShimmerPhase(): androidx.compose.runtime.State<Float> {
+    val transition = rememberInfiniteTransition(label = "KanimeSharedShimmer")
+    return transition.animateFloat(
+        initialValue = -0.6f,
+        targetValue = 1.6f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 1250, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "ShimmerOffset"
-    )
-    val brush = Brush.linearGradient(
-        colors = listOf(base, highlight, base),
-        start = Offset(translate, 0f),
-        end = Offset(translate + 280f, 180f)
-    )
-    Box(
-        modifier = modifier
-            .clip(shape)
-            .background(brush)
+        label = "ShimmerPhase"
     )
 }
 
 @Composable
-fun AnimeCardSkeleton(modifier: Modifier = Modifier) {
+fun ShimmerBox(
+    modifier: Modifier = Modifier,
+    shape: Shape = MaterialTheme.shapes.medium,
+    phaseState: androidx.compose.runtime.State<Float>? = null
+) {
+    val base = MaterialTheme.colorScheme.surfaceContainerLow
+    val highlight = MaterialTheme.colorScheme.surfaceContainerHighest
+    val activePhase = phaseState ?: rememberSharedShimmerPhase()
+
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .drawBehind {
+                val p = activePhase.value
+                val startX = size.width * p
+                val span = (size.width * 0.7f).coerceAtLeast(120f)
+                drawRect(
+                    brush = Brush.linearGradient(
+                        colors = listOf(base, highlight, base),
+                        start = Offset(startX, 0f),
+                        end = Offset(startX + span, size.height * 0.6f)
+                    )
+                )
+            }
+    )
+}
+
+@Composable
+fun AnimeCardSkeleton(
+    modifier: Modifier = Modifier,
+    phaseState: androidx.compose.runtime.State<Float>? = null
+) {
+    val shared = phaseState ?: rememberSharedShimmerPhase()
     Column(modifier = modifier) {
         ShimmerBox(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f),
-            shape = MaterialTheme.shapes.medium
+            shape = MaterialTheme.shapes.medium,
+            phaseState = shared
         )
         Spacer(modifier = Modifier.height(8.dp))
         ShimmerBox(
             modifier = Modifier
                 .fillMaxWidth(0.78f)
                 .height(14.dp),
-            shape = PillShape
+            shape = PillShape,
+            phaseState = shared
         )
         Spacer(modifier = Modifier.height(6.dp))
         ShimmerBox(
             modifier = Modifier
                 .fillMaxWidth(0.46f)
                 .height(11.dp),
-            shape = PillShape
+            shape = PillShape,
+            phaseState = shared
         )
     }
 }

@@ -1,5 +1,8 @@
 package com.kanime.app.data.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class Anime(
     val id: String,
     val title: String,
@@ -42,6 +45,7 @@ data class Anime(
     val isDetailsLoaded: Boolean = false
 )
 
+@Immutable
 data class Episode(
     val id: String,
     val episodeNumber: Int,
@@ -57,11 +61,13 @@ data class Episode(
     val thumbnailSource: String? = null
 )
 
+@Immutable
 data class MalLink(
     val name: String,
     val url: String
 )
 
+@Immutable
 data class MalVoiceActor(
     val peopleId: Int?,
     val name: String,
@@ -70,6 +76,7 @@ data class MalVoiceActor(
     val language: String?
 )
 
+@Immutable
 data class MalCharacter(
     val characterId: Int?,
     val name: String,
@@ -79,6 +86,7 @@ data class MalCharacter(
     val voiceActors: List<MalVoiceActor> = emptyList()
 )
 
+@Immutable
 data class MalCharacterAnime(
     val animeId: Int?,
     val title: String,
@@ -87,6 +95,7 @@ data class MalCharacterAnime(
     val role: String?
 )
 
+@Immutable
 data class MalCharacterDetails(
     val characterId: Int,
     val name: String,
@@ -101,11 +110,13 @@ data class MalCharacterDetails(
     val voiceActors: List<MalVoiceActor> = emptyList()
 )
 
+@Immutable
 data class MalPicture(
     val image: String,
     val thumbnail: String?
 )
 
+@Immutable
 data class MalTheme(
     val number: Int,
     val title: String,
@@ -114,11 +125,13 @@ data class MalTheme(
     val spotifyUrl: String?
 )
 
+@Immutable
 data class MalThemes(
     val opening: List<MalTheme> = emptyList(),
     val ending: List<MalTheme> = emptyList()
 )
 
+@Immutable
 data class MalVideo(
     val label: String,
     val youtubeId: String?,
@@ -127,11 +140,13 @@ data class MalVideo(
     val songArtist: String? = null
 )
 
+@Immutable
 data class MalVideos(
     val musicVideos: List<MalVideo> = emptyList(),
     val trailers: List<MalVideo> = emptyList()
 )
 
+@Immutable
 data class MalRecommendation(
     val animeId: Int,
     val title: String,
@@ -139,6 +154,7 @@ data class MalRecommendation(
     val votes: Int
 )
 
+@Immutable
 data class AnimeExtras(
     val characters: List<MalCharacter> = emptyList(),
     val themes: MalThemes = MalThemes(),

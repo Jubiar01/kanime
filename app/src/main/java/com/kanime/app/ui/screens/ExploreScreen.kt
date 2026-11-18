@@ -48,6 +48,7 @@ import com.kanime.app.ui.components.AnimeCardSkeleton
 import com.kanime.app.ui.components.EmptyStateView
 import com.kanime.app.ui.components.GlassChip
 import com.kanime.app.ui.components.GlassSurface
+import com.kanime.app.ui.components.rememberSharedShimmerPhase
 import com.kanime.app.ui.theme.KAnimeTheme
 import com.kanime.app.ui.theme.KanimeAmbientBackdrop
 import com.kanime.app.ui.theme.KanimeSpacing
@@ -240,6 +241,7 @@ internal fun ExploreScreenContent(
         // Adaptive Content Area
         when {
             isLoading && displayList.isEmpty() -> {
+                val sharedShimmer = rememberSharedShimmerPhase()
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = minCellSize),
                     contentPadding = PaddingValues(
@@ -252,8 +254,11 @@ internal fun ExploreScreenContent(
                     verticalArrangement = Arrangement.spacedBy(KanimeSpacing.lg),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(8) {
-                        AnimeCardSkeleton(modifier = Modifier.fillMaxWidth())
+                    items(8, contentType = { "skeleton" }) {
+                        AnimeCardSkeleton(
+                            modifier = Modifier.fillMaxWidth(),
+                            phaseState = sharedShimmer
+                        )
                     }
                 }
             }
@@ -299,7 +304,7 @@ internal fun ExploreScreenContent(
                     verticalArrangement = Arrangement.spacedBy(KanimeSpacing.lg),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(displayList, key = { it.id }) { anime ->
+                    items(displayList, key = { it.id }, contentType = { "anime_card" }) { anime ->
                         AnimeCard(
                             anime = anime,
                             modifier = Modifier.fillMaxWidth(),

@@ -1,9 +1,7 @@
 package com.kanime.app.ui.components
 
 import android.content.res.Configuration
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,7 +15,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,23 +34,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Devices
+import androidx.compose.ui.tooling.preview.Devices 
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.kanime.app.R
 import com.kanime.app.data.model.Episode
 import com.kanime.app.ui.theme.KAnimeTheme
+import com.kanime.app.ui.theme.KanimeGlass
+import com.kanime.app.ui.theme.KanimeMotion
 import com.kanime.app.ui.theme.KanimeSpacing
 import com.kanime.app.ui.theme.PillShape
+import com.kanime.app.ui.theme.rememberBoundedImageRequest
+import java.util.Locale
 
 /**
- * Clean episode row card using M3 surfaceContainerLow with glass play badge
- * and strictly M3 role-paired filler/recap tags.
+ * Clean episode row card using M3 surfaceContainerLow with bounded-size Coil decoding,
+ * lightweight play badge, and consistent locale-formatted release date.
  */
 @Composable
 fun EpisodeCard(
@@ -61,16 +63,44 @@ fun EpisodeCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val configuration = LocalConfiguration.current
+    val locale = remember(configuration) {
+        configuration.locales[0] ?: Locale.getDefault()
+    }
+    val glass = KanimeGlass.tokens
+    val colorScheme = MaterialTheme.colorScheme
+
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
         targetValue = if (isPressed) 0.985f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
+        animationSpec = KanimeMotion.pressSpring(),
         label = "EpisodeCardScale"
     )
+
+    val thumbRequest = rememberBoundedImageRequest(
+        url = episode.thumbnail,
+        widthDp = 120.dp,
+        heightDp = 68.dp
+    )
+
+    val metaText = remember(episode.duration, episode.aired, locale) {
+        buildList {
+            if (episode.duration.isNotBlank()) add(episode.duration)
+            AnimeDateFormatter.formatEpisodeDate(episode.aired, locale)?.let { add(it) }
+        }.joinToString(" · ")
+    }
+
+    val playBadgeBg = if (glass.isDark) {
+        colorScheme.surfaceContainerLowest.copy(alpha = 0.78f)
+    } else {
+        colorScheme.inverseSurface.copy(alpha = 0.80f)
+    }
+    val playBadgeFg = if (glass.isDark) {
+        colorScheme.onSurface
+    } else {
+        colorScheme.inverseOnSurface
+    }
 
     Surface(
         modifier = modifier
@@ -82,13 +112,13 @@ fun EpisodeCard(
             .clip(MaterialTheme.shapes.medium)
             .clickable(
                 interactionSource = interactionSource,
-                indication = ripple(color = MaterialTheme.colorScheme.primary),
+                indication = ripple(color = colorScheme.primary),
                 role = Role.Button,
                 onClick = onClick
             ),
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+        color = colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, colorScheme.outlineVariant.copy(alpha = 0.55f))
     ) {
         Row(
             modifier = Modifier
@@ -101,26 +131,26 @@ fun EpisodeCard(
                     .width(120.dp)
                     .aspectRatio(16f / 9f)
                     .clip(MaterialTheme.shapes.small)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .background(colorScheme.surfaceContainerHighest)
             ) {
                 AsyncImage(
-                    model = episode.thumbnail,
+                    model = thumbRequest,
                     contentDescription = episode.title,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
-                GlassSurface(
+                Box(
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .size(34.dp),
-                    shape = CircleShape,
-                    overMedia = true,
-                    showShadow = false
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(playBadgeBg),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
                         contentDescription = stringResource(R.string.action_play),
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        tint = playBadgeFg,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -139,31 +169,31 @@ fun EpisodeCard(
                     Text(
                         text = stringResource(R.string.episode_label, episode.episodeNumber),
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = colorScheme.primary,
                         fontWeight = FontWeight.SemiBold
                     )
                     if (episode.isFiller) {
                         Surface(
-                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            color = colorScheme.tertiaryContainer,
                             shape = PillShape
                         ) {
                             Text(
                                 text = stringResource(R.string.badge_filler),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                color = colorScheme.onTertiaryContainer,
                                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                             )
                         }
                     }
                     if (episode.isRecap) {
                         Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            color = colorScheme.secondaryContainer,
                             shape = PillShape
                         ) {
                             Text(
                                 text = stringResource(R.string.badge_recap),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                color = colorScheme.onSecondaryContainer,
                                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                             )
                         }
@@ -174,22 +204,16 @@ fun EpisodeCard(
                     text = episode.title,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                val metaText = remember(episode.duration, episode.aired) {
-                    buildList {
-                        if (episode.duration.isNotBlank()) add(episode.duration)
-                        episode.aired?.takeIf { it.isNotBlank() }?.let { add(it) }
-                    }.joinToString(" · ")
-                }
                 if (metaText.isNotBlank()) {
                     Text(
                         text = metaText,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -213,7 +237,7 @@ private fun EpisodeCardPreview() {
                         title = "The Journey's End",
                         duration = "24m",
                         thumbnail = "",
-                        aired = "Sep 29, 2023",
+                        aired = "2023-09-29",
                         isFiller = true
                     ),
                     onClick = {}

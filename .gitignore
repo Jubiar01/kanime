@@ -17,6 +17,8 @@ local.properties
 kanikoto-plugin/
 /kanimeheaven-plugin/
 kanimeheaven-plugin/
+/kopensubtitle-plugin/
+kopensubtitle-plugin/
 
 # Signing keys & credentials (keep private!)
 *.jks

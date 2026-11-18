@@ -5,8 +5,6 @@ import android.content.Context
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,7 +16,7 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -183,6 +181,8 @@ private fun isReducedTransparencyEnabled(context: Context): Boolean {
 /**
  * Subtle warm ambient backdrop behind the app shell so floating glass layers
  * always have soft tonal warmth to refract without muddying content.
+ * Uses pre-softened multi-stop radial gradients cached in [drawWithCache]
+ * (zero full-screen RenderEffect blur pass, zero scroll recomposition).
  */
 @Composable
 fun KanimeAmbientBackdrop(
@@ -190,48 +190,41 @@ fun KanimeAmbientBackdrop(
     content: @Composable BoxScope.() -> Unit
 ) {
     val glass = KanimeGlass.tokens
-    val colorScheme = MaterialTheme.colorScheme
+    val transparentBg = MaterialTheme.colorScheme.background.copy(alpha = 0f)
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
+            .drawWithCache {
+                val w = size.width
+                val h = size.height
+                val baseBrush = Brush.verticalGradient(
                     colors = listOf(glass.ambientTop, glass.ambientBottom)
                 )
-            )
-    ) {
-        val blobModifier = if (glass.useRealBlur) {
-            Modifier
-                .fillMaxSize()
-                .blur(48.dp)
-        } else {
-            Modifier.fillMaxSize()
-        }
-
-        Canvas(modifier = blobModifier) {
-            val w = size.width
-            val h = size.height
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(glass.ambientGlowPrimary, colorScheme.background.copy(alpha = 0f)),
-                    center = Offset(w * 0.18f, h * 0.10f),
-                    radius = (w.coerceAtLeast(h) * 0.52f).coerceAtLeast(1f)
-                ),
-                radius = (w.coerceAtLeast(h) * 0.52f).coerceAtLeast(1f),
-                center = Offset(w * 0.18f, h * 0.10f)
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(glass.ambientGlowSecondary, colorScheme.background.copy(alpha = 0f)),
-                    center = Offset(w * 0.86f, h * 0.88f),
-                    radius = (w.coerceAtLeast(h) * 0.48f).coerceAtLeast(1f)
-                ),
-                radius = (w.coerceAtLeast(h) * 0.48f).coerceAtLeast(1f),
-                center = Offset(w * 0.86f, h * 0.88f)
-            )
-        }
-
-        content()
-    }
+                val topCenter = Offset(w * 0.16f, h * 0.08f)
+                val topRadius = (w.coerceAtLeast(h) * 0.62f).coerceAtLeast(1f)
+                val topGlow = Brush.radialGradient(
+                    0.0f to glass.ambientGlowPrimary,
+                    0.45f to glass.ambientGlowPrimary.copy(alpha = glass.ambientGlowPrimary.alpha * 0.42f),
+                    1.0f to transparentBg,
+                    center = topCenter,
+                    radius = topRadius
+                )
+                val bottomCenter = Offset(w * 0.88f, h * 0.90f)
+                val bottomRadius = (w.coerceAtLeast(h) * 0.56f).coerceAtLeast(1f)
+                val bottomGlow = Brush.radialGradient(
+                    0.0f to glass.ambientGlowSecondary,
+                    0.50f to glass.ambientGlowSecondary.copy(alpha = glass.ambientGlowSecondary.alpha * 0.38f),
+                    1.0f to transparentBg,
+                    center = bottomCenter,
+                    radius = bottomRadius
+                )
+                onDrawBehind {
+                    drawRect(brush = baseBrush)
+                    drawCircle(brush = topGlow, radius = topRadius, center = topCenter)
+                    drawCircle(brush = bottomGlow, radius = bottomRadius, center = bottomCenter)
+                }
+            },
+        content = content
+    )
 }

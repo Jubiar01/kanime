@@ -1,27 +1,34 @@
 {
   "plugin_config_version": 1,
-  "release_notes": "Official KAnikoto signed release v1.0.0. Featuring high-speed multi-server HLS stream extraction, MegaPlay AES-256 decryption, and synchronized subtitles.",
+  "release_date": "2026-11-18",
+  "min_app_version": "1.0.0",
+  "release_notes": [
+    "Initial KAnikoto catalog configuration",
+    "Supports HLS stream extraction and synchronized subtitles"
+  ],
   "plugins": [
     {
       "id": "kanikoto",
       "name": "KAnikoto Extractor",
       "packageName": "com.kanime.plugin.kanikoto",
       "providerAuthority": "com.kanime.plugin.kanikoto.provider",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "versionCode": 1,
-      "author": "KAnime Official",
-      "description": "Official online streaming plugin for Anikoto with MegaPlay AES decryption and multi-server HLS streams.",
+      "author": "Kanime",
+      "description": "Online streaming source for Anikoto with multi-server HLS streams.",
       "capabilities": [
-        "HLS 1080p FHD",
-        "MegaPlay AES-256",
+        "HLS 1080p",
         "Sub & Dub"
       ],
       "sourceUrl": "https://anikototv.bz",
       "apkFileName": "kanikoto-plugin.apk",
       "apkDownloadUrl": "https://github.com/Jubiar01/kanime-plugin/raw/refs/heads/main/kanikoto-plugin-release.apk",
-      "apkSize": "2.4 MB",
+      "apkSize": "128 KB",
       "isDefault": true,
-      "changelog": "Added MegaPlay AES decryption and high-speed multi-server HLS extraction."
+      "changelog": [
+        "Initial KAnikoto extractor release",
+        "Multi-server HLS playback with sub and dub support"
+      ]
     }
   ]
 }

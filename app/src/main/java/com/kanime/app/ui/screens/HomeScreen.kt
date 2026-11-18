@@ -28,6 +28,7 @@ import com.kanime.app.ui.components.AnimeCardSkeleton
 import com.kanime.app.ui.components.HeroBannerCarousel
 import com.kanime.app.ui.components.HeroBannerSkeleton
 import com.kanime.app.ui.components.SectionHeader
+import com.kanime.app.ui.components.rememberSharedShimmerPhase
 import com.kanime.app.ui.theme.KAnimeTheme
 import com.kanime.app.ui.theme.KanimeAmbientBackdrop
 import com.kanime.app.ui.theme.KanimeSpacing
@@ -91,7 +92,7 @@ internal fun HomeScreenContent(
         contentPadding = PaddingValues(top = topContentPadding, bottom = bottomContentPadding),
         verticalArrangement = Arrangement.spacedBy(KanimeSpacing.lg)
     ) {
-        item(key = "hero_carousel") {
+        item(key = "hero_carousel", contentType = "hero") {
             if (heroItems.isEmpty()) {
                 Box(modifier = Modifier.padding(horizontal = horizontalPad)) {
                     HeroBannerSkeleton()
@@ -106,7 +107,7 @@ internal fun HomeScreenContent(
             }
         }
 
-        item(key = "row_trending") {
+        item(key = "row_trending", contentType = "anime_row") {
             AnimeHorizontalSection(
                 title = stringResource(R.string.home_trending),
                 animes = trending,
@@ -117,7 +118,7 @@ internal fun HomeScreenContent(
             )
         }
 
-        item(key = "row_airing") {
+        item(key = "row_airing", contentType = "anime_row") {
             AnimeHorizontalSection(
                 title = stringResource(R.string.home_top_airing),
                 animes = topAiring,
@@ -128,7 +129,7 @@ internal fun HomeScreenContent(
             )
         }
 
-        item(key = "row_seasonal") {
+        item(key = "row_seasonal", contentType = "anime_row") {
             AnimeHorizontalSection(
                 title = stringResource(R.string.home_seasonal),
                 animes = seasonal,
@@ -156,16 +157,25 @@ private fun AnimeHorizontalSection(
         modifier = Modifier.padding(horizontal = (horizontalPad - KanimeSpacing.lg).coerceAtLeast(0.dp))
     )
     Spacer(modifier = Modifier.height(KanimeSpacing.xs))
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = horizontalPad),
-        horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
-    ) {
-        if (animes.isEmpty()) {
-            items(4) {
-                AnimeCardSkeleton(modifier = Modifier.width(cardWidth))
+    if (animes.isEmpty()) {
+        val sharedShimmer = rememberSharedShimmerPhase()
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = horizontalPad),
+            horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
+        ) {
+            items(4, contentType = { "skeleton" }) {
+                AnimeCardSkeleton(
+                    modifier = Modifier.width(cardWidth),
+                    phaseState = sharedShimmer
+                )
             }
-        } else {
-            items(animes, key = { it.id }) { anime ->
+        }
+    } else {
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = horizontalPad),
+            horizontalArrangement = Arrangement.spacedBy(KanimeSpacing.md)
+        ) {
+            items(animes, key = { it.id }, contentType = { "anime_card" }) { anime ->
                 AnimeCard(
                     anime = anime,
                     modifier = Modifier.width(cardWidth),
