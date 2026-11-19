@@ -131,6 +131,18 @@ object SubtitleOffsetHelper {
         }
     }
 
+    /**
+     * Start time (ms) of every cue in the subtitle file, sorted. Used by "Sync to line": the player
+     * matches the line the viewer just heard against these to compute an exact delay.
+     */
+    suspend fun loadCueStarts(url: String, referer: String?): List<Long> = withContext(Dispatchers.IO) {
+        val raw = downloadSubtitleText(url, referer) ?: return@withContext emptyList()
+        CUE_TIMING_REGEX.findAll(raw)
+            .mapNotNull { parseTimestampMs(it.groupValues[1]) }
+            .sorted()
+            .toList()
+    }
+
     suspend fun resolveOffsetSubtitleUri(
         context: Context,
         url: String,

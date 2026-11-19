@@ -124,6 +124,9 @@ import com.kanime.app.ui.player.CaptionEdgeStyle
 import com.kanime.app.ui.player.CaptionFont
 import com.kanime.app.ui.player.CaptionPosition
 import com.kanime.app.ui.player.CaptionTextSize
+import com.kanime.app.ui.player.PlayerIconButton
+import com.kanime.app.ui.player.PlayerScrims
+import com.kanime.app.ui.player.PlayerSeekBar
 import com.kanime.app.ui.player.SubtitleOffsetHelper
 import com.kanime.app.ui.player.applyCaptionStyle
 import com.kanime.app.ui.player.anime.AnimeEnhancementStatus
@@ -423,14 +426,18 @@ fun PlayerDialog(
                 opEndMs = intro?.endMs ?: 0L,
                 edStartMs = outro?.startMs ?: 0L,
                 edEndMs = outro?.endMs ?: 0L,
-                authority = plugin.providerAuthority
+                authority = plugin.providerAuthority,
+                durationMs = durationMs
             )
             isAutoSyncing = false
             if (res == null) {
-                if (manual) aspectRatioToastMessage = "Update KOpenSubtitle to 1.0.3 for auto-sync"
+                if (manual) aspectRatioToastMessage = "Update KOpenSubtitle to 1.0.4 for better auto-sync"
                 return@launch
             }
-            val usable = res.ok && (res.confidence == "high" || (manual && res.confidence == "medium"))
+            // Medium confidence is applied automatically too: the plugin only returns a non-zero offset when
+            // it can prove the file is off, and a nudge toward the right range beats a subtitle that is
+            // definitely early/late. The user can still fine-tune or reset in the sync card.
+            val usable = res.ok && (res.confidence == "high" || res.confidence == "medium")
             if (!usable) {
                 if (manual) aspectRatioToastMessage = "Couldn't auto-sync this subtitle — adjust manually"
                 return@launch
@@ -443,7 +450,56 @@ fun PlayerDialog(
             subtitleDelayMs = res.offsetMs.coerceIn(-60_000L, 60_000L)
             val sec = subtitleDelayMs / 1000.0
             aspectRatioToastMessage = "Subtitles auto-synced " + String.format(Locale.US, "%+.1fs", sec) +
-                if (res.scale != 1.0) " (fps fix)" else ""
+                (if (res.scale != 1.0) " (fps fix)" else "") +
+                (if (res.confidence != "high") " · fine-tune if needed" else "")
+        }
+    }
+
+    // Marks drawn on the seek bar (recap / intro / outro)
+    val seekSegments = remember(skipTimes) {
+        listOfNotNull(skipTimes.recap, skipTimes.intro, skipTimes.outro)
+            .filter { it.endMs > it.startMs }
+            .map { it.startMs..it.endMs }
+    }
+
+    // "Sync to line": the viewer taps the moment they hear a line begin; the delay is set so the closest
+    // subtitle line starts exactly there. Works for every file, with or without intro/outro data.
+    fun syncSubtitleToLine() {
+        val stream = (resolutionState as? StreamResolutionState.Success)?.stream
+        val track = openSubtitleTracks.firstOrNull { it.lang.equals(selectedSubtitleTrack, ignoreCase = true) }
+            ?: stream?.subtitles?.firstOrNull { it.lang.equals(selectedSubtitleTrack, ignoreCase = true) }
+        if (track == null) {
+            aspectRatioToastMessage = "Select an external subtitle track first"
+            return
+        }
+        val tapPositionMs = currentPositionMs
+        coroutineScope.launch {
+            val starts = SubtitleOffsetHelper.loadCueStarts(track.url, stream?.referer)
+            if (starts.isEmpty()) {
+                aspectRatioToastMessage = "Couldn't read this subtitle file"
+                return@launch
+            }
+            // Compensate for the ~0.25s between hearing a line and tapping.
+            val heardAtMs = (tapPositionMs - 250L).coerceAtLeast(0L)
+            val scale = subtitleScale
+            val currentDelay = subtitleDelayMs
+            var bestIndex = -1
+            var bestDistance = Long.MAX_VALUE
+            for (i in starts.indices) {
+                val shownAt = (starts[i] * scale).toLong() + currentDelay
+                val distance = kotlin.math.abs(shownAt - heardAtMs)
+                if (distance < bestDistance) {
+                    bestDistance = distance
+                    bestIndex = i
+                }
+            }
+            if (bestIndex < 0 || bestDistance > 30_000L) {
+                aspectRatioToastMessage = "No subtitle line near this moment — try again at a line"
+                return@launch
+            }
+            val newDelay = heardAtMs - (starts[bestIndex] * scale).toLong()
+            subtitleDelayMs = newDelay.coerceIn(-60_000L, 60_000L)
+            aspectRatioToastMessage = "Subtitles synced " + String.format(Locale.US, "%+.1fs", subtitleDelayMs / 1000.0)
         }
     }
 
@@ -1133,6 +1189,9 @@ fun PlayerDialog(
 
                 LaunchedEffect(exoPlayer, streamUrl, currentSubSignature) {
                     if (currentSubSignature == appliedSubSignatureRef.value) return@LaunchedEffect
+                    // Coalesce rapid sync taps (+0.1s x 5) into a single reload instead of re-preparing the
+                    // player on every tap, which caused stutter and made manual syncing painful.
+                    delay(350L)
                     val validSourceSubtitles = stream.subtitles.filter { sub ->
                         sub.url.isNotBlank() &&
                             !sub.url.contains("thumbnails", ignoreCase = true) &&
@@ -1684,128 +1743,114 @@ fun PlayerDialog(
                                 compact = true
                             )
 
-                            // Portrait Player Controls Overlay
+                            // Portrait Player Controls Overlay (liquid glass)
                             androidx.compose.animation.AnimatedVisibility(
                                 visible = showControls,
                                 enter = fadeIn(),
                                 exit = fadeOut(),
                                 modifier = Modifier.fillMaxSize()
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f))
-                                ) {
-                                    // Top Bar in Portrait: Back arrow, Server icon, 1080p (Image 1)
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    PlayerScrims()
+
+                                    // Top: back · streams · quality badge
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .align(Alignment.TopCenter)
-                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                            .padding(horizontal = 6.dp, vertical = 4.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        IconButton(onClick = onDismiss) {
-                                            Icon(
-                                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                                contentDescription = "Back",
-                                                tint = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.size(24.dp)
-                                            )
-                                        }
+                                        PlayerIconButton(
+                                            icon = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back",
+                                            onClick = onDismiss,
+                                            size = 44.dp,
+                                            iconSize = 24.dp
+                                        )
 
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
                                         ) {
-                                            IconButton(onClick = { showStreamsSheet = true }) {
-                                                Icon(
-                                                    imageVector = Icons.Default.FolderOpen,
-                                                    contentDescription = "Streams",
-                                                    tint = MaterialTheme.colorScheme.onSurface,
-                                                    modifier = Modifier.size(22.dp)
+                                            PlayerIconButton(
+                                                icon = Icons.Default.FolderOpen,
+                                                contentDescription = "Streams",
+                                                onClick = { showStreamsSheet = true },
+                                                size = 40.dp,
+                                                iconSize = 21.dp
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .padding(end = 6.dp)
+                                                    .clip(PillShape)
+                                                    .background(
+                                                        if (isVideoEnhanced) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                                                    )
+                                                    .clickable { showEnhanceSheet = true }
+                                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                            ) {
+                                                Text(
+                                                    text = qualityBadgeText,
+                                                    color = if (isVideoEnhanced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1
                                                 )
                                             }
-                                            Text(
-                                                text = qualityBadgeText,
-                                                color = if (isVideoEnhanced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier
-                                                    .clickable { showEnhanceSheet = true }
-                                                    .padding(end = 8.dp)
-                                            )
                                         }
                                     }
 
-                                    // Center Play / Pause
-                                    IconButton(
-                                        onClick = {
-                                            if (isPlaying) pausePlayback() else resumeOrPlay()
-                                        },
+                                    // Centre: glass play / pause
+                                    GlassSurface(
+                                        onClick = { if (isPlaying) pausePlayback() else resumeOrPlay() },
+                                        shape = CircleShape,
+                                        overMedia = true,
                                         modifier = Modifier
-                                            .size(56.dp)
                                             .align(Alignment.Center)
+                                            .size(60.dp)
                                     ) {
                                         Icon(
                                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                             contentDescription = if (isPlaying) "Pause" else "Play",
                                             tint = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(46.dp)
+                                            modifier = Modifier.size(34.dp)
                                         )
                                     }
 
-                                    // Bottom row inside video: Time on left, PiP and Fullscreen on right (Image 1)
-                                    Column(
+                                    // Bottom: seek bar with time + PiP + fullscreen on one line
+                                    Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .align(Alignment.BottomCenter)
-                                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                                            .padding(start = 14.dp, end = 4.dp, bottom = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            PlayerTimeLabel(
-                                                positionProvider = { currentPositionMs },
-                                                durationProvider = { durationMs }
-                                            )
-
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                IconButton(
-                                                    onClick = { enterPipMode() },
-                                                    modifier = Modifier.size(44.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.PictureInPicture,
-                                                        contentDescription = "PiP",
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
-                                                }
-
-                                                IconButton(
-                                                    onClick = {
-                                                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                                                    },
-                                                    modifier = Modifier.size(44.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.Fullscreen,
-                                                        contentDescription = "Fullscreen",
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(22.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        PlayerSeekSlider(
+                                        PlayerSeekBar(
                                             positionProvider = { currentPositionMs },
                                             durationProvider = { durationMs },
-                                            onSeek = { newPos -> exoPlayer.seekTo(newPos) },
-                                            height = 20.dp
+                                            onSeek = { newPos ->
+                                                exoPlayer.seekTo(newPos)
+                                                currentPositionMs = newPos
+                                            },
+                                            segments = seekSegments,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        PlayerIconButton(
+                                            icon = Icons.Default.PictureInPicture,
+                                            contentDescription = "PiP",
+                                            onClick = { enterPipMode() },
+                                            size = 40.dp,
+                                            iconSize = 20.dp
+                                        )
+                                        PlayerIconButton(
+                                            icon = Icons.Default.Fullscreen,
+                                            contentDescription = "Fullscreen",
+                                            onClick = { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE },
+                                            size = 40.dp,
+                                            iconSize = 22.dp
                                         )
                                     }
                                 }
@@ -2231,7 +2276,7 @@ fun PlayerDialog(
                         }
 
                         // ══════════════════════════════════════════════════════════════
-                        // NATIVE JETPACK COMPOSE LANDSCAPE HUD (Exact Image 4)
+                        // LANDSCAPE HUD — liquid glass top pill, centre transport, glass control dock
                         // ══════════════════════════════════════════════════════════════
                         AnimatedVisibility(
                             visible = showControls,
@@ -2239,178 +2284,151 @@ fun PlayerDialog(
                             exit = fadeOut(),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = if (isControlsLocked) 0.05f else 0.40f))
-                            ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                PlayerScrims(locked = isControlsLocked)
+
                                 if (isControlsLocked) {
-                                    IconButton(
+                                    GlassSurface(
                                         onClick = { isControlsLocked = false },
+                                        shape = CircleShape,
+                                        overMedia = true,
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
                                             .padding(top = 20.dp, end = 36.dp)
                                             .size(48.dp)
-                                            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.65f), CircleShape)
                                     ) {
                                         Icon(Icons.Default.Lock, contentDescription = "Unlock", tint = MaterialTheme.colorScheme.onSurface)
                                     }
                                 } else {
-                                    // ── Top Bar (Image 4) ──────────────────────────────────
-                                    Row(
+                                    // ── Top glass pill: collapse · title · quick actions ───────────
+                                    GlassSurface(
+                                        shape = PillShape,
+                                        overMedia = true,
                                         modifier = Modifier
-                                            .fillMaxWidth()
                                             .align(Alignment.TopCenter)
-                                            .padding(horizontal = 36.dp, vertical = 14.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 28.dp, vertical = 12.dp)
                                     ) {
-                                        // Down-arrow / collapse button (Image 4 top-left)
-                                        IconButton(
-                                            onClick = {
-                                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                                            },
-                                            modifier = Modifier.size(48.dp)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Default.KeyboardArrowDown,
+                                            PlayerIconButton(
+                                                icon = Icons.Default.KeyboardArrowDown,
                                                 contentDescription = "Collapse",
-                                                tint = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.size(36.dp)
+                                                onClick = { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT },
+                                                size = 44.dp,
+                                                iconSize = 30.dp
                                             )
-                                        }
 
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
 
-                                        // Episode & Anime Title (smooth marquee for long titles so nothing clips off-screen)
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = formattedEpisodeHeading,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                style = MaterialTheme.typography.titleMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1,
-                                                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
-                                            )
-                                            Text(
-                                                text = anime.title,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
-                                            )
-                                        }
-
-                                        // Top Right Actions (Image 4): PiP, Speed, Lock, and 1080p
-                                        Column(horizontalAlignment = Alignment.End) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                IconButton(
-                                                    onClick = { showEnhanceSheet = true },
-                                                    modifier = Modifier.size(38.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.AutoAwesome,
-                                                        contentDescription = "Anime4K Upscaler",
-                                                        tint = if (isVideoEnhanced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
-                                                        modifier = Modifier.size(22.dp)
-                                                    )
-                                                }
-
-                                                IconButton(
-                                                    onClick = {
-                                                        val nextState = !autoPlayNext
-                                                        onToggleAutoPlayNext?.invoke(nextState)
-                                                        aspectRatioToastMessage = if (nextState) "Auto-Play: ON" else "Auto-Play: OFF"
-                                                    },
-                                                    modifier = Modifier.size(38.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.AutoMirrored.Filled.PlaylistPlay,
-                                                        contentDescription = "Auto-Play Next",
-                                                        tint = if (autoPlayNext) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-                                                        modifier = Modifier.size(24.dp)
-                                                    )
-                                                }
-
-                                                IconButton(
-                                                    onClick = { enterPipMode() },
-                                                    modifier = Modifier.size(38.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.PictureInPictureAlt,
-                                                        contentDescription = "PiP",
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(22.dp)
-                                                    )
-                                                }
-
-                                                IconButton(
-                                                    onClick = { showSpeedSheet = true },
-                                                    modifier = Modifier.size(38.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.Speed,
-                                                        contentDescription = "Speed",
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(22.dp)
-                                                    )
-                                                }
-
-                                                IconButton(
-                                                    onClick = { isControlsLocked = true },
-                                                    modifier = Modifier.size(38.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.LockOpen,
-                                                        contentDescription = "Lock",
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(22.dp)
-                                                    )
-                                                }
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = formattedEpisodeHeading,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
+                                                )
+                                                Text(
+                                                    text = anime.title,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
+                                                )
                                             }
 
-                                            Text(
-                                                text = qualityBadgeText,
-                                                color = if (isVideoEnhanced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
+                                            // Quality / enhancement badge
+                                            Box(
                                                 modifier = Modifier
+                                                    .padding(horizontal = 6.dp)
+                                                    .clip(PillShape)
+                                                    .background(
+                                                        if (isVideoEnhanced) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+                                                    )
                                                     .clickable { showEnhanceSheet = true }
-                                                    .padding(end = 8.dp)
+                                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                            ) {
+                                                Text(
+                                                    text = qualityBadgeText,
+                                                    color = if (isVideoEnhanced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1
+                                                )
+                                            }
+
+                                            PlayerIconButton(
+                                                icon = Icons.Default.AutoAwesome,
+                                                contentDescription = "Anime4K Upscaler",
+                                                onClick = { showEnhanceSheet = true },
+                                                active = isVideoEnhanced,
+                                                size = 40.dp,
+                                                iconSize = 20.dp
+                                            )
+                                            PlayerIconButton(
+                                                icon = Icons.AutoMirrored.Filled.PlaylistPlay,
+                                                contentDescription = "Auto-Play Next",
+                                                onClick = {
+                                                    val nextState = !autoPlayNext
+                                                    onToggleAutoPlayNext?.invoke(nextState)
+                                                    aspectRatioToastMessage = if (nextState) "Auto-Play: ON" else "Auto-Play: OFF"
+                                                },
+                                                active = autoPlayNext,
+                                                size = 40.dp,
+                                                iconSize = 22.dp
+                                            )
+                                            PlayerIconButton(
+                                                icon = Icons.Default.PictureInPictureAlt,
+                                                contentDescription = "PiP",
+                                                onClick = { enterPipMode() },
+                                                size = 40.dp,
+                                                iconSize = 20.dp
+                                            )
+                                            PlayerIconButton(
+                                                icon = Icons.Default.Speed,
+                                                contentDescription = "Speed",
+                                                onClick = { showSpeedSheet = true },
+                                                active = playbackSpeed != 1.0f,
+                                                size = 40.dp,
+                                                iconSize = 20.dp
+                                            )
+                                            PlayerIconButton(
+                                                icon = Icons.Default.LockOpen,
+                                                contentDescription = "Lock controls",
+                                                onClick = { isControlsLocked = true },
+                                                size = 40.dp,
+                                                iconSize = 20.dp
                                             )
                                         }
                                     }
 
-                                    // ── Center Playback Controls (Image 4) ────────────────
+                                    // ── Centre transport ───────────────────────────────────────
                                     Row(
                                         modifier = Modifier.align(Alignment.Center),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(48.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(36.dp)
                                     ) {
-                                        IconButton(
+                                        PlayerIconButton(
+                                            icon = Icons.Default.SkipPrevious,
+                                            contentDescription = "Previous Episode",
                                             onClick = { onPreviousEpisode?.invoke() },
                                             enabled = onPreviousEpisode != null,
-                                            modifier = Modifier.size(54.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.SkipPrevious,
-                                                contentDescription = "Previous Episode",
-                                                tint = if (onPreviousEpisode != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-                                                modifier = Modifier.size(40.dp)
-                                            )
-                                        }
+                                            size = 56.dp,
+                                            iconSize = 36.dp
+                                        )
 
-                                        // Liquid Glass Play/Pause Pill
                                         GlassSurface(
-                                            onClick = {
-                                                if (isPlaying) pausePlayback() else resumeOrPlay()
-                                            },
+                                            onClick = { if (isPlaying) pausePlayback() else resumeOrPlay() },
                                             shape = CircleShape,
                                             overMedia = true,
-                                            modifier = Modifier.size(72.dp)
+                                            modifier = Modifier.size(76.dp)
                                         ) {
                                             Icon(
                                                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -2420,197 +2438,141 @@ fun PlayerDialog(
                                             )
                                         }
 
-                                        IconButton(
+                                        PlayerIconButton(
+                                            icon = Icons.Default.SkipNext,
+                                            contentDescription = "Next Episode",
                                             onClick = { onNextEpisode?.invoke() },
                                             enabled = onNextEpisode != null,
-                                            modifier = Modifier.size(54.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.SkipNext,
-                                                contentDescription = "Next Episode",
-                                                tint = if (onNextEpisode != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-                                                modifier = Modifier.size(40.dp)
-                                            )
-                                        }
+                                            size = 56.dp,
+                                            iconSize = 36.dp
+                                        )
                                     }
 
-                                    // ── Bottom Section (Image 4 & Image 6) ────────────────
-                                    Column(
+                                    // ── Bottom glass dock: seek bar + actions ──────────────────
+                                    GlassSurface(
+                                        shape = MaterialTheme.shapes.extraLarge,
+                                        overMedia = true,
                                         modifier = Modifier
-                                            .fillMaxWidth()
                                             .align(Alignment.BottomCenter)
-                                            .padding(start = 36.dp, end = 36.dp, top = 6.dp, bottom = 24.dp)
+                                            .fillMaxWidth()
+                                            .padding(start = 28.dp, end = 28.dp, bottom = 16.dp)
                                     ) {
-                                        // Row 1: Time on left (06:04 / 23:50), +10s pill on right (Image 4)
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 4.dp)
                                         ) {
-                                            PlayerTimeLabel(
+                                            PlayerSeekBar(
                                                 positionProvider = { currentPositionMs },
-                                                durationProvider = { durationMs }
+                                                durationProvider = { durationMs },
+                                                onSeek = { newPos ->
+                                                    exoPlayer.seekTo(newPos)
+                                                    currentPositionMs = newPos
+                                                },
+                                                segments = seekSegments
                                             )
 
-                                            // Liquid glass +10s pill button
-                                            GlassSurface(
-                                                onClick = {
-                                                    val nextPos = (exoPlayer.currentPosition + 10000).coerceAtMost(exoPlayer.duration)
-                                                    exoPlayer.seekTo(nextPos)
-                                                },
-                                                shape = PillShape,
-                                                overMedia = true
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
+                                                // Left: settings · streams · subtitles · audio
                                                 Row(
-                                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
-                                                    Icon(
-                                                        Icons.Default.FastForward,
-                                                        contentDescription = "+10s",
-                                                        tint = MaterialTheme.colorScheme.primary,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text(
-                                                        text = "+10s",
-                                                        color = MaterialTheme.colorScheme.onSurface,
-                                                        style = MaterialTheme.typography.labelMedium,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        Spacer(modifier = Modifier.height(2.dp))
-
-                                        // Row 2: Full width progress slider (isolated recomposition scope)
-                                        PlayerSeekSlider(
-                                            positionProvider = { currentPositionMs },
-                                            durationProvider = { durationMs },
-                                            onSeek = { newPos -> exoPlayer.seekTo(newPos) },
-                                            height = 26.dp
-                                        )
-
-                                        // Row 3: Bottom Action Row (Image 4 & Image 6)
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            // Left group of 4 icons (Image 4)
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                            ) {
-                                                // Icon 1: Video Settings / Speed [▶⚙]
-                                                IconButton(
-                                                    onClick = { showSpeedSheet = true },
-                                                    modifier = Modifier.size(44.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.Tune,
+                                                    PlayerIconButton(
+                                                        icon = Icons.Default.Tune,
                                                         contentDescription = "Player Settings",
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(22.dp)
+                                                        onClick = { showSpeedSheet = true }
                                                     )
-                                                }
-
-                                                // Icon 2: Folder / Streams list [📁] (Image 1 trigger)
-                                                IconButton(
-                                                    onClick = { showStreamsSheet = true },
-                                                    modifier = Modifier.size(44.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.FolderOpen,
+                                                    PlayerIconButton(
+                                                        icon = Icons.Default.FolderOpen,
                                                         contentDescription = "Streams",
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(22.dp)
+                                                        onClick = { showStreamsSheet = true }
                                                     )
-                                                }
-
-                                                // Icon 3: Subtitles / CC [💳] (With active container pill in Image 6)
-                                                Box(
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(8.dp))
-                                                        .background(if (subtitlesEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.Transparent)
-                                                ) {
-                                                    IconButton(
+                                                    PlayerIconButton(
+                                                        icon = Icons.Default.Subtitles,
+                                                        contentDescription = "Subtitles",
                                                         onClick = { showSubtitlesSheet = true },
-                                                        modifier = Modifier.size(44.dp)
-                                                    ) {
-                                                        Icon(
-                                                            Icons.Default.Subtitles,
-                                                            contentDescription = "Subtitles",
-                                                            tint = if (subtitlesEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                                            modifier = Modifier.size(22.dp)
-                                                        )
-                                                    }
-                                                }
-
-                                                // Icon 4: Audio track selector [🎵]
-                                                Box(
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(8.dp))
-                                                        .background(if (showAudioSheet) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.Transparent)
-                                                ) {
-                                                    IconButton(
+                                                        active = subtitlesEnabled,
+                                                        tint = if (subtitlesEnabled) null else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                                    )
+                                                    PlayerIconButton(
+                                                        icon = Icons.Default.MusicNote,
+                                                        contentDescription = "Audio Track ($activeAudioShortLabel)",
                                                         onClick = { showAudioSheet = true },
-                                                        modifier = Modifier.size(44.dp)
-                                                    ) {
-                                                        Icon(
-                                                            Icons.Default.MusicNote,
-                                                            contentDescription = "Audio Track ($activeAudioShortLabel)",
-                                                            tint = if (showAudioSheet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                                            modifier = Modifier.size(22.dp)
-                                                        )
+                                                        active = showAudioSheet
+                                                    )
+                                                    if (useOpenSubtitle && subtitlesEnabled && openSubtitleTracks.isNotEmpty()) {
+                                                        // One-tap manual sync for early/late subtitles
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .padding(start = 4.dp)
+                                                                .clip(PillShape)
+                                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
+                                                                .clickable { syncSubtitleToLine() }
+                                                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                                        ) {
+                                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.TouchApp,
+                                                                    contentDescription = null,
+                                                                    tint = MaterialTheme.colorScheme.primary,
+                                                                    modifier = Modifier.size(16.dp)
+                                                                )
+                                                                Spacer(modifier = Modifier.width(6.dp))
+                                                                Text(
+                                                                    text = stringResource(R.string.player_subtitle_sync_line),
+                                                                    color = MaterialTheme.colorScheme.primary,
+                                                                    style = MaterialTheme.typography.labelMedium,
+                                                                    fontWeight = FontWeight.SemiBold,
+                                                                    maxLines = 1
+                                                                )
+                                                            }
+                                                        }
                                                     }
                                                 }
-                                            }
 
-                                            // Right group of 3 icons (Image 4)
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                            ) {
-                                                // Icon 1: PiP [⧉]
-                                                IconButton(
-                                                    onClick = { enterPipMode() },
-                                                    modifier = Modifier.size(44.dp)
+                                                // Middle: quick seek
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
-                                                    Icon(
-                                                        Icons.Default.PictureInPicture,
+                                                    PlayerIconButton(
+                                                        icon = Icons.Default.Replay10,
+                                                        contentDescription = "Back 10 seconds",
+                                                        onClick = { performDoubleTapSeek(-10) }
+                                                    )
+                                                    PlayerIconButton(
+                                                        icon = Icons.Default.Forward10,
+                                                        contentDescription = "Forward 10 seconds",
+                                                        onClick = { performDoubleTapSeek(10) }
+                                                    )
+                                                }
+
+                                                // Right: PiP · picture · exit fullscreen
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    PlayerIconButton(
+                                                        icon = Icons.Default.PictureInPicture,
                                                         contentDescription = "Picture-in-Picture",
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(22.dp)
+                                                        onClick = { enterPipMode() }
                                                     )
-                                                }
-
-                                                // Icon 2: Aspect ratio / Picture toggle [ ⛶ ]
-                                                IconButton(
-                                                    onClick = { cycleAspectRatio() },
-                                                    modifier = Modifier.size(44.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.AspectRatio,
+                                                    PlayerIconButton(
+                                                        icon = Icons.Default.AspectRatio,
                                                         contentDescription = "Aspect Ratio",
-                                                        tint = if (pictureMode != VideoPictureMode.FIT || videoZoom > 1.01f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(22.dp)
+                                                        onClick = { cycleAspectRatio() },
+                                                        active = pictureMode != VideoPictureMode.FIT || videoZoom > 1.01f
                                                     )
-                                                }
-
-                                                // Icon 3: Fullscreen exit [ ⛶ ] -> switches back to portrait
-                                                IconButton(
-                                                    onClick = {
-                                                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                                                    },
-                                                    modifier = Modifier.size(44.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.FullscreenExit,
+                                                    PlayerIconButton(
+                                                        icon = Icons.Default.FullscreenExit,
                                                         contentDescription = "Exit Fullscreen",
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(24.dp)
+                                                        onClick = { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT },
+                                                        iconSize = 24.dp
                                                     )
                                                 }
                                             }
@@ -2624,7 +2586,7 @@ fun PlayerDialog(
                         SkipSegmentOverlay(
                             segment = if (isControlsLocked) null else activeSkipSegment,
                             compact = false,
-                            bottomPadding = if (showControls) 136.dp else 28.dp,
+                            bottomPadding = if (showControls) 152.dp else 28.dp,
                             endPadding = 36.dp,
                             onSkip = { seg ->
                                 val maxDur = exoPlayer.duration.coerceAtLeast(0L)
@@ -3109,60 +3071,40 @@ fun PlayerDialog(
                         val hasExternalSubtitles = sourceValidSubtitles.isNotEmpty() ||
                             (canUseOpenSub && useOpenSubtitle && openSubtitleTracks.isNotEmpty())
 
-                        // Real-time Subtitle Sync / Delay adjustment (-0.5s / +0.5s) for external tracks
+                        // Subtitle sync: fix early / late captions for external tracks
                         if (subtitlesEnabled && hasExternalSubtitles) {
                             Spacer(modifier = Modifier.height(10.dp))
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainer,
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(18.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Row(
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = stringResource(R.string.player_subtitle_sync),
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Text(
-                                            text = stringResource(R.string.player_subtitle_sync_hint),
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
+                                    // Title + current offset (tap the value to reset)
                                     Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        FilledTonalIconButton(
-                                            onClick = { runSubtitleAutoSync(manual = true) },
-                                            enabled = !isAutoSyncing,
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            if (isAutoSyncing) {
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.size(14.dp),
-                                                    strokeWidth = 2.dp,
-                                                    color = MaterialTheme.colorScheme.primary
-                                                )
-                                            } else {
-                                                Icon(Icons.Default.AutoFixHigh, contentDescription = "Auto-sync", modifier = Modifier.size(16.dp))
-                                            }
-                                        }
-                                        FilledTonalIconButton(
-                                            onClick = { subtitleDelayMs = (subtitleDelayMs - 500L).coerceAtLeast(-60_000L) },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(Icons.Default.Remove, contentDescription = "-0.5s", modifier = Modifier.size(16.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = stringResource(R.string.player_subtitle_sync),
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Text(
+                                                text = stringResource(R.string.player_subtitle_sync_hint),
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                         val delaySec = subtitleDelayMs / 1000.0
                                         val delayLabel = if (subtitleDelayMs > 0L) {
@@ -3170,25 +3112,106 @@ fun PlayerDialog(
                                         } else {
                                             String.format(Locale.US, "%.1fs", delaySec)
                                         }
-                                        Text(
-                                            text = delayLabel,
-                                            color = if (subtitleDelayMs != 0L) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = FontWeight.Bold,
+                                        val hasShift = subtitleDelayMs != 0L || subtitleScale != 1.0
+                                        Box(
                                             modifier = Modifier
-                                                .clickable(enabled = subtitleDelayMs != 0L || subtitleScale != 1.0) {
+                                                .clip(PillShape)
+                                                .background(
+                                                    if (hasShift) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                                                )
+                                                .clickable(enabled = hasShift) {
                                                     subtitleDelayMs = 0L
                                                     subtitleScale = 1.0
                                                 }
-                                                .padding(horizontal = 4.dp)
-                                        )
-                                        FilledTonalIconButton(
-                                            onClick = { subtitleDelayMs = (subtitleDelayMs + 500L).coerceAtMost(60_000L) },
-                                            modifier = Modifier.size(32.dp)
+                                                .padding(horizontal = 12.dp, vertical = 6.dp)
                                         ) {
-                                            Icon(Icons.Default.Add, contentDescription = "+0.5s", modifier = Modifier.size(16.dp))
+                                            Text(
+                                                text = if (hasShift) "$delayLabel · ${stringResource(R.string.player_subtitle_sync_reset)}" else delayLabel,
+                                                color = if (hasShift) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                                                fontWeight = FontWeight.Bold
+                                            )
                                         }
                                     }
+
+                                    // Step buttons: earlier ... later
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        listOf(-1000L to "-1s", -100L to "-0.1s", 100L to "+0.1s", 1000L to "+1s").forEach { (step, label) ->
+                                            FilledTonalButton(
+                                                onClick = { subtitleDelayMs = (subtitleDelayMs + step).coerceIn(-60_000L, 60_000L) },
+                                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(38.dp)
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Smart tools
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Button(
+                                            onClick = { syncSubtitleToLine() },
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(40.dp)
+                                        ) {
+                                            Icon(Icons.Default.TouchApp, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = stringResource(R.string.player_subtitle_sync_line),
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1
+                                            )
+                                        }
+                                        FilledTonalButton(
+                                            onClick = { runSubtitleAutoSync(manual = true) },
+                                            enabled = !isAutoSyncing,
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(40.dp)
+                                        ) {
+                                            if (isAutoSyncing) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(16.dp),
+                                                    strokeWidth = 2.dp,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            } else {
+                                                Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            }
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = stringResource(R.string.player_subtitle_auto_sync),
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = stringResource(R.string.player_subtitle_sync_line_hint),
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
                                 }
                             }
                         }
@@ -4903,47 +4926,6 @@ private fun formatEpisodeHeading(episodeNumber: Int, rawTitle: String): String {
         trimmed.equals("Episode 0$episodeNumber", ignoreCase = true) ||
         trimmed.equals("Ep $episodeNumber", ignoreCase = true)
     return if (isRedundant) "Episode $episodeNumber" else "Ep $episodeNumber • $trimmed"
-}
-
-@Composable
-private fun PlayerTimeLabel(
-    positionProvider: () -> Long,
-    durationProvider: () -> Long
-) {
-    Text(
-        text = "${formatTime(positionProvider())} / ${formatTime(durationProvider())}",
-        color = MaterialTheme.colorScheme.onSurface,
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.Medium
-    )
-}
-
-@Composable
-private fun PlayerSeekSlider(
-    positionProvider: () -> Long,
-    durationProvider: () -> Long,
-    onSeek: (Long) -> Unit,
-    height: androidx.compose.ui.unit.Dp
-) {
-    val dur = durationProvider()
-    val pos = positionProvider()
-    Slider(
-        value = if (dur > 0L) (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f,
-        onValueChange = { ratio ->
-            val currentDur = durationProvider()
-            if (currentDur > 0L) {
-                onSeek((ratio * currentDur).toLong())
-            }
-        },
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(height),
-        colors = SliderDefaults.colors(
-            thumbColor = MaterialTheme.colorScheme.primary,
-            activeTrackColor = MaterialTheme.colorScheme.primary,
-            inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
-        )
-    )
 }
 
 private fun formatTime(ms: Long): String {

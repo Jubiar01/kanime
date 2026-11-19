@@ -1,0 +1,257 @@
+package com.kanime.app.ui.player
+
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import java.util.Locale
+
+/**
+ * Soft top + bottom gradient scrims for the player HUD. Replaces the old flat 40% black wash so the
+ * video stays visible in the middle while the glass controls keep their contrast at the edges.
+ */
+@Composable
+fun PlayerScrims(
+    modifier: Modifier = Modifier,
+    locked: Boolean = false
+) {
+    val scrim = MaterialTheme.colorScheme.scrim
+    val strength = if (locked) 0.08f else 1f
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .drawBehind {
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.00f to scrim.copy(alpha = 0.70f * strength),
+                            0.28f to scrim.copy(alpha = 0.12f * strength),
+                            0.50f to Color.Transparent,
+                            0.66f to scrim.copy(alpha = 0.10f * strength),
+                            1.00f to scrim.copy(alpha = 0.82f * strength)
+                        )
+                    )
+                )
+            }
+    )
+}
+
+/**
+ * Round icon button for the HUD. Sits flat on glass (no extra container) and gets a soft primary
+ * tint when [active]. Always at least 44dp wide for comfortable touch.
+ */
+@Composable
+fun PlayerIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: Dp = 44.dp,
+    iconSize: Dp = 22.dp,
+    active: Boolean = false,
+    enabled: Boolean = true,
+    tint: Color? = null
+) {
+    val resolvedTint = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.32f)
+        tint != null -> tint
+        active -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(
+                if (active && enabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                else Color.Transparent
+            )
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = resolvedTint,
+            modifier = Modifier.size(iconSize)
+        )
+    }
+}
+
+/**
+ * Seek bar with elapsed / total time built in.
+ *
+ *  - Only seeks when the finger is lifted (no stuttering through every drag step on network streams).
+ *  - The time on the left follows the thumb while scrubbing.
+ *  - [segments] (intro / recap / outro in ms) are drawn as lighter marks on the track so you can see
+ *    where they are at a glance.
+ */
+@Composable
+fun PlayerSeekBar(
+    positionProvider: () -> Long,
+    durationProvider: () -> Long,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+    segments: List<LongRange> = emptyList()
+) {
+    val duration = durationProvider().coerceAtLeast(0L)
+    val position = positionProvider().coerceAtLeast(0L)
+
+    var scrub by remember { mutableStateOf<Float?>(null) }
+    val interaction = remember { MutableInteractionSource() }
+    val dragging by interaction.collectIsDraggedAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val active = dragging || pressed || scrub != null
+
+    val fraction = scrub ?: if (duration > 0L) (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
+    val shownMs = if (duration > 0L) (fraction * duration).toLong() else 0L
+
+    val thumbSize by animateDpAsState(
+        targetValue = if (active) 20.dp else 14.dp,
+        animationSpec = spring(),
+        label = "SeekThumb"
+    )
+    val trackHeight by animateDpAsState(
+        targetValue = if (active) 6.dp else 4.dp,
+        animationSpec = spring(),
+        label = "SeekTrack"
+    )
+
+    val primary = MaterialTheme.colorScheme.primary
+    val inactive = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.24f)
+    val segmentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
+    val timeStyle = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum")
+    val onSurface = MaterialTheme.colorScheme.onSurface
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = formatPlayerTime(shownMs),
+            color = if (active) primary else onSurface,
+            style = timeStyle,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.widthIn(min = 40.dp)
+        )
+
+        Slider(
+            value = fraction,
+            onValueChange = { scrub = it },
+            onValueChangeFinished = {
+                val target = scrub
+                if (target != null && duration > 0L) {
+                    onSeek((target * duration).toLong())
+                }
+                scrub = null
+            },
+            interactionSource = interaction,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 6.dp)
+                .height(32.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = primary,
+                activeTrackColor = primary,
+                inactiveTrackColor = inactive
+            ),
+            thumb = {
+                Box(
+                    modifier = Modifier
+                        .size(thumbSize)
+                        .clip(CircleShape)
+                        .background(primary)
+                )
+            },
+            track = {
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(trackHeight)
+                ) {
+                    val h = size.height
+                    val radius = CornerRadius(h / 2f, h / 2f)
+                    drawRoundRect(color = inactive, size = size, cornerRadius = radius)
+                    if (duration > 0L) {
+                        segments.forEach { range ->
+                            val s = (range.first.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+                            val e = (range.last.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+                            if (e > s) {
+                                drawRoundRect(
+                                    color = segmentColor,
+                                    topLeft = Offset(size.width * s, 0f),
+                                    size = Size(size.width * (e - s), h),
+                                    cornerRadius = radius
+                                )
+                            }
+                        }
+                    }
+                    if (fraction > 0f) {
+                        drawRoundRect(
+                            color = primary,
+                            size = Size(size.width * fraction, h),
+                            cornerRadius = radius
+                        )
+                    }
+                }
+            }
+        )
+
+        Text(
+            text = formatPlayerTime(duration),
+            color = onSurface.copy(alpha = 0.72f),
+            style = timeStyle,
+            modifier = Modifier.widthIn(min = 40.dp)
+        )
+    }
+}
+
+/** 05:07 for short videos, 1:05:07 once past an hour. */
+fun formatPlayerTime(ms: Long): String {
+    val totalSeconds = (ms / 1000L).coerceAtLeast(0L)
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%02d:%02d", minutes, seconds)
+    }
+}

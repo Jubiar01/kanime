@@ -32,7 +32,8 @@ data class SubtitleSyncResult(
     val offsetMs: Long,
     val scale: Double,
     val confidence: String, // "high" | "medium" | "low"
-    val reason: String
+    val reason: String,
+    val uncertaintyMs: Long = 0L // width of the interval the real offset lies in (KOpenSubtitle 1.0.4+)
 )
 
 data class PluginStream(
@@ -189,7 +190,8 @@ object PluginBridge {
         opEndMs: Long,
         edStartMs: Long,
         edEndMs: Long,
-        authority: String = KOPENSUBTITLE_AUTHORITY
+        authority: String = KOPENSUBTITLE_AUTHORITY,
+        durationMs: Long = 0L
     ): SubtitleSyncResult? = withContext(Dispatchers.IO) {
         try {
             val payload = JSONObject().apply {
@@ -198,6 +200,7 @@ object PluginBridge {
                 put("opEndMs", opEndMs)
                 put("edStartMs", edStartMs)
                 put("edEndMs", edEndMs)
+                put("durationMs", durationMs)
             }
             val bundle = callProvider(context, authority, "analyzeSync", payload.toString()) ?: return@withContext null
             if (!bundle.containsKey("confidence")) return@withContext null // older plugin without sync support
@@ -206,7 +209,8 @@ object PluginBridge {
                 offsetMs = bundle.getLong("offsetMs", 0L),
                 scale = bundle.getDouble("scale", 1.0),
                 confidence = bundle.getString("confidence") ?: "low",
-                reason = bundle.getString("reason") ?: ""
+                reason = bundle.getString("reason") ?: "",
+                uncertaintyMs = bundle.getLong("uncertaintyMs", 0L)
             )
         } catch (e: Exception) {
             Log.w(TAG, "analyzeSync error on authority=$authority: ${e.message}")
