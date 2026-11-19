@@ -56,6 +56,18 @@ object AniListApi {
         val year: Int?
     )
 
+    /** One scheduled (or just-aired) episode from AniList's airing schedule. */
+    data class AniListAiringEntry(
+        val airingAtSec: Long,
+        val episode: Int,
+        val anilistId: Int,
+        val malId: Int,
+        val title: String,
+        val cover: String?,
+        val format: String?,
+        val totalEpisodes: Int?
+    )
+
     private data class FranchiseNode(
         val entry: AniListFranchiseEntry,
         val prequels: List<Pair<Int, String?>>,
@@ -405,6 +417,87 @@ object AniListApi {
         val media = mediaObj?.let { parseMedia(it) }?.takeIf { it.id > 0 }
         CatalogCache.set(cacheKey, media, CatalogCache.Bucket.MAPPING)
         return media
+    }
+
+    // ── Airing schedule (release calendar + new-episode alerts) ──────────────
+
+    /**
+     * Every episode airing between [startSec] and [endSec] (unix seconds), sorted by time.
+     * Keyless. Entries without a MAL id (cannot be opened in the app) and adult titles are dropped.
+     * Returns null when the very first request fails, so callers can tell "nothing airs" from "offline".
+     */
+    suspend fun getAiringSchedule(
+        startSec: Long,
+        endSec: Long,
+        useCache: Boolean = true
+    ): List<AniListAiringEntry>? {
+        val cacheKey = "anilist:airing:v1:${startSec / 900L}:${endSec / 900L}"
+        if (useCache) CatalogCache.get<List<AniListAiringEntry>>(cacheKey)?.let { return it }
+
+        val query = "query (\$start: Int, \$end: Int, \$page: Int) { " +
+            "Page(page: \$page, perPage: 50) { " +
+            "pageInfo { hasNextPage } " +
+            "airingSchedules(airingAt_greater: \$start, airingAt_lesser: \$end, sort: TIME) { " +
+            "airingAt episode " +
+            "media { id idMal title { romaji english } coverImage { large extraLarge } format episodes isAdult } " +
+            "} } }"
+
+        val result = ArrayList<AniListAiringEntry>()
+        val seen = HashSet<String>()
+        var page = 1
+        while (page <= 6) {
+            val vars = JSONObject().apply {
+                put("start", startSec)
+                put("end", endSec)
+                put("page", page)
+            }
+            val pageObj = executeGraphQl(query, vars)?.optJSONObject("Page")
+            if (pageObj == null) {
+                if (page == 1) return null
+                break
+            }
+            val schedules = pageObj.optJSONArray("airingSchedules")
+            if (schedules != null) {
+                for (i in 0 until schedules.length()) {
+                    val item = schedules.optJSONObject(i) ?: continue
+                    val media = item.optJSONObject("media") ?: continue
+                    if (media.optBoolean("isAdult", false)) continue
+                    val malId = if (media.isNull("idMal")) 0 else media.optInt("idMal")
+                    val anilistId = media.optInt("id")
+                    if (malId <= 0 || anilistId <= 0) continue
+                    val episode = item.optInt("episode")
+                    if (episode <= 0) continue
+                    if (!seen.add("$anilistId:$episode")) continue
+
+                    val titleObj = media.optJSONObject("title")
+                    val title = titleObj?.optString("english")?.takeIf { it.isNotBlank() && it != "null" }
+                        ?: titleObj?.optString("romaji")?.takeIf { it.isNotBlank() && it != "null" }
+                        ?: continue
+                    val coverObj = media.optJSONObject("coverImage")
+                    val cover = coverObj?.optString("extraLarge")?.takeIf { it.isNotBlank() && it != "null" }
+                        ?: coverObj?.optString("large")?.takeIf { it.isNotBlank() && it != "null" }
+
+                    result.add(
+                        AniListAiringEntry(
+                            airingAtSec = item.optLong("airingAt"),
+                            episode = episode,
+                            anilistId = anilistId,
+                            malId = malId,
+                            title = title,
+                            cover = cover,
+                            format = media.optString("format").takeIf { it.isNotBlank() && it != "null" },
+                            totalEpisodes = if (media.isNull("episodes")) null else media.optInt("episodes").takeIf { it > 0 }
+                        )
+                    )
+                }
+            }
+            if (pageObj.optJSONObject("pageInfo")?.optBoolean("hasNextPage", false) != true) break
+            page++
+        }
+
+        result.sortBy { it.airingAtSec }
+        if (useCache) CatalogCache.set(cacheKey, result, CatalogCache.Bucket.SCHEDULE)
+        return result
     }
 
     // ── Franchise chain (prequel -> sequel) for the Seasons row ──────────────

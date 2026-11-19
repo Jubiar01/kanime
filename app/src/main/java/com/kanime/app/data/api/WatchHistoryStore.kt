@@ -34,6 +34,26 @@ data class WatchHistoryEntry(
     )
 }
 
+/** How far into one episode the viewer got. Used for progress bars, watched marks and "Continue Ep N". */
+data class EpisodeProgress(
+    val positionMs: Long,
+    val durationMs: Long,
+) {
+    val fraction: Float
+        get() = if (durationMs > 0L) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+
+    /** Past ~90% (credits) or less than 90s left of an episode that is at least a minute long. */
+    val isWatched: Boolean
+        get() = durationMs > 60_000L && (fraction >= 0.90f || (durationMs - positionMs) <= 90_000L)
+
+    /** Started, but not finished. */
+    val isInProgress: Boolean
+        get() = !isWatched && positionMs >= 3_000L && durationMs > 0L
+
+    val remainingMs: Long
+        get() = (durationMs - positionMs).coerceAtLeast(0L)
+}
+
 /**
  * Persists user-saved Watchlist items (no default auto-favorites) and Watch History with exact
  * playback resume timestamps across app restarts.
@@ -60,6 +80,30 @@ object WatchHistoryStore {
     // Key: "<animeId>:<episodeNumber>" -> Pair(positionMs, durationMs)
     private val episodePositions = LinkedHashMap<String, Pair<Long, Long>>()
 
+    private val _episodeProgress = MutableStateFlow<Map<String, EpisodeProgress>>(emptyMap())
+
+    /** Per-episode progress for every tracked episode, keyed "<animeId>:<episodeNumber>". */
+    val episodeProgressFlow: StateFlow<Map<String, EpisodeProgress>> = _episodeProgress.asStateFlow()
+
+    /** Progress of every tracked episode of one anime, keyed by episode number. */
+    fun progressByEpisode(all: Map<String, EpisodeProgress>, animeId: String): Map<Int, EpisodeProgress> {
+        val prefix = "$animeId:"
+        val result = HashMap<Int, EpisodeProgress>()
+        for ((key, value) in all) {
+            if (!key.startsWith(prefix)) continue
+            val number = key.substring(prefix.length).toIntOrNull() ?: continue
+            result[number] = value
+        }
+        return result
+    }
+
+    private fun publishProgress() {
+        val snapshot = synchronized(episodePositions) {
+            episodePositions.mapValues { (_, v) -> EpisodeProgress(v.first, v.second) }
+        }
+        _episodeProgress.value = snapshot
+    }
+
     fun init(context: Context) {
         if (prefs != null) return
         val sp = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -83,6 +127,7 @@ object WatchHistoryStore {
                 }
             }
         }
+        publishProgress()
     }
 
     fun toggleWatchlist(anime: Anime): Set<String> {
@@ -121,8 +166,14 @@ object WatchHistoryStore {
         val key = positionKey(anime.id, episode.episodeNumber)
 
         val positionsJson = synchronized(episodePositions) {
-            episodePositions.remove(key)
-            episodePositions[key] = safePos to safeDur
+            val existing = episodePositions.remove(key)
+            // Starting playback "touches" the entry with an unknown duration. Keep what we already know so
+            // opening an episode never wipes its watched mark / progress bar.
+            episodePositions[key] = if (safeDur == 0L && existing != null && existing.second > 0L) {
+                existing
+            } else {
+                safePos to safeDur
+            }
             while (episodePositions.size > MAX_EPISODE_POSITIONS) {
                 val oldestKey = episodePositions.keys.firstOrNull() ?: break
                 episodePositions.remove(oldestKey)
@@ -152,6 +203,7 @@ object WatchHistoryStore {
             ?.putString(KEY_HISTORY, encodeHistory(updatedHistory))
             ?.putString(KEY_EPISODE_POSITIONS, positionsJson)
             ?.apply()
+        publishProgress()
     }
 
     /**
@@ -186,6 +238,7 @@ object WatchHistoryStore {
             ?.putString(KEY_HISTORY, encodeHistory(updated))
             ?.putString(KEY_EPISODE_POSITIONS, positionsJson)
             ?.apply()
+        publishProgress()
     }
 
     fun clearHistory() {
@@ -197,6 +250,7 @@ object WatchHistoryStore {
             ?.remove(KEY_HISTORY)
             ?.remove(KEY_EPISODE_POSITIONS)
             ?.apply()
+        publishProgress()
     }
 
     private fun positionKey(animeId: String, episodeNumber: Int): String = "$animeId:$episodeNumber"

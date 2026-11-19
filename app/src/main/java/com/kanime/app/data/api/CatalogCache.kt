@@ -16,7 +16,8 @@ object CatalogCache {
     enum class Bucket(val ttlMs: Long) {
         MAPPING(24L * 60L * 60L * 1000L),
         EPISODES(60L * 60L * 1000L),
-        STREAM(5L * 60L * 1000L)
+        STREAM(5L * 60L * 1000L),
+        SCHEDULE(20L * 60L * 1000L)
     }
 
     private data class Entry(

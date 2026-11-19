@@ -24,7 +24,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class NavTab {
-    HOME, EXPLORE, WATCHLIST, SETTINGS
+    HOME, EXPLORE, SCHEDULE, WATCHLIST, SETTINGS
 }
 
 data class AnimeUiState(

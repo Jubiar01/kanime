@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Tune
@@ -77,6 +78,7 @@ import com.kanime.app.ui.player.anime.AnimeSharpenStrength
 import com.kanime.app.ui.player.anime.AnimeUpscaleQuality
 import com.kanime.app.ui.theme.KAnimeTheme
 import com.kanime.app.ui.theme.KanimeAmbientBackdrop
+import com.kanime.app.ui.notify.rememberEpisodeAlertsToggle
 import com.kanime.app.ui.theme.KanimeSpacing
 import com.kanime.app.ui.theme.KanimeWindowWidthSizeClass
 import com.kanime.app.ui.theme.LocalWindowSizeClass
@@ -119,6 +121,7 @@ fun SettingsScreen(
     val lineSharpeningEnabled by CatalogConfig.animeLineSharpeningFlow.collectAsStateWithLifecycle()
     val animeUpscaleQuality by CatalogConfig.animeUpscaleQualityFlow.collectAsStateWithLifecycle()
     val animeSharpenStrength by CatalogConfig.animeSharpenStrengthFlow.collectAsStateWithLifecycle()
+    val (episodeAlertsEnabled, setEpisodeAlertsEnabled) = rememberEpisodeAlertsToggle()
 
     val activePluginCount = remember(plugins) { plugins.count { it.isInstalled && it.isEnabled } }
     val pluginUpdateCount = remember(plugins) { plugins.count { it.hasUpdate } }
@@ -128,6 +131,8 @@ fun SettingsScreen(
     }
 
     SettingsScreenContent(
+        episodeAlertsEnabled = episodeAlertsEnabled,
+        onEpisodeAlertsChange = setEpisodeAlertsEnabled,
         themeMode = themeMode,
         dynamicColor = dynamicColor,
         supportsDynamicColor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
@@ -184,7 +189,9 @@ internal fun SettingsScreenContent(
     onSaveTmdbKey: (String) -> Unit,
     onClearCache: () -> Unit,
     topContentPadding: Dp = 12.dp,
-    bottomContentPadding: Dp = KanimeSpacing.floatingBarClearance
+    bottomContentPadding: Dp = KanimeSpacing.floatingBarClearance,
+    episodeAlertsEnabled: Boolean = false,
+    onEpisodeAlertsChange: (Boolean) -> Unit = {}
 ) {
     val windowSize = LocalWindowSizeClass.current
     val horizontalPad = when (windowSize.widthSizeClass) {
@@ -392,6 +399,16 @@ internal fun SettingsScreenContent(
                             title = stringResource(R.string.settings_autoplay),
                             checked = autoPlayNext,
                             onCheckedChange = onAutoPlayNextChange
+                        )
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                        SettingsSwitchRow(
+                            icon = Icons.Default.NotificationsActive,
+                            title = stringResource(R.string.settings_episode_alerts),
+                            subtitle = stringResource(R.string.settings_episode_alerts_hint),
+                            checked = episodeAlertsEnabled,
+                            onCheckedChange = onEpisodeAlertsChange
                         )
 
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))

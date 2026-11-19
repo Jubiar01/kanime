@@ -95,6 +95,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.lazy.rememberLazyListState
 import coil3.compose.AsyncImage
 import com.kanime.app.R
+import com.kanime.app.data.api.EpisodeProgress
+import com.kanime.app.data.api.WatchHistoryStore
 import com.kanime.app.data.model.Anime
 import com.kanime.app.data.model.AnimeExtras
 import com.kanime.app.data.model.Episode
@@ -374,6 +376,15 @@ fun DetailScreen(
         anime.copy(episodeList = displayEpisodes)
     }
 
+    val allEpisodeProgress by WatchHistoryStore.episodeProgressFlow.collectAsStateWithLifecycle()
+    val episodeProgress = remember(allEpisodeProgress, anime.id) {
+        WatchHistoryStore.progressByEpisode(allEpisodeProgress, anime.id)
+    }
+    val lastWatchedEpisodeNumber = uiState.watchHistory.firstOrNull { it.anime.id == anime.id }?.episodeNumber
+    val resumeTarget = remember(displayEpisodes, episodeProgress, lastWatchedEpisodeNumber) {
+        computeResumeTarget(displayEpisodes, episodeProgress, lastWatchedEpisodeNumber)
+    }
+
     LaunchedEffect(anime.id, anime.malId, uiState.selectedAnimeExtras.seasonsLoaded) {
         if (!uiState.selectedAnimeExtras.seasonsLoaded) viewModel.loadSeasonsForSelected()
     }
@@ -421,7 +432,9 @@ fun DetailScreen(
             viewModel.closeCharacter()
             viewModel.openAnimeByMalId(malId, title, image)
         },
-        onOpenExternalUrl = { url -> openExternalUrl(context, url) }
+        onOpenExternalUrl = { url -> openExternalUrl(context, url) },
+        episodeProgress = episodeProgress,
+        resumeTarget = resumeTarget
     )
 }
 
@@ -453,7 +466,9 @@ internal fun DetailScreenContent(
     onOpenCharacter: (Int) -> Unit,
     onCloseCharacter: () -> Unit,
     onOpenAnimeByMalId: (Int, String, String?) -> Unit,
-    onOpenExternalUrl: (String) -> Unit
+    onOpenExternalUrl: (String) -> Unit,
+    episodeProgress: Map<Int, EpisodeProgress> = emptyMap(),
+    resumeTarget: ResumeTarget? = null
 ) {
     val windowSize = LocalWindowSizeClass.current
     var isSynopsisExpanded by remember(anime.id) { mutableStateOf(false) }
@@ -498,7 +513,8 @@ internal fun DetailScreenContent(
                         activeSourceShortName = activeSourceShortName,
                         onToggleWatchlist = onToggleWatchlist,
                         onOpenSourceSheet = { onShowSourceSheet(true) },
-                        onPlayFirst = { displayEpisodes.firstOrNull()?.let(onPlayEpisode) },
+                        resumeTarget = resumeTarget,
+                        onPlayFirst = { (resumeTarget?.episode ?: displayEpisodes.firstOrNull())?.let(onPlayEpisode) },
                         onSwitchPlugin = onSwitchPlugin
                     )
                 }
@@ -532,6 +548,7 @@ internal fun DetailScreenContent(
                             onOpenCharacter = onOpenCharacter,
                             onOpenAnimeByMalId = onOpenAnimeByMalId,
                             onOpenExternalUrl = onOpenExternalUrl,
+                            episodeProgress = episodeProgress,
                             horizontalPadding = 0.dp
                         )
                     }
@@ -566,7 +583,8 @@ internal fun DetailScreenContent(
                             activeSourceShortName = activeSourceShortName,
                             onToggleWatchlist = onToggleWatchlist,
                             onOpenSourceSheet = { onShowSourceSheet(true) },
-                            onPlayFirst = { displayEpisodes.firstOrNull()?.let(onPlayEpisode) },
+                            resumeTarget = resumeTarget,
+                        onPlayFirst = { (resumeTarget?.episode ?: displayEpisodes.firstOrNull())?.let(onPlayEpisode) },
                             onSwitchPlugin = onSwitchPlugin
                         )
 
@@ -592,6 +610,7 @@ internal fun DetailScreenContent(
                     onOpenCharacter = onOpenCharacter,
                     onOpenAnimeByMalId = onOpenAnimeByMalId,
                     onOpenExternalUrl = onOpenExternalUrl,
+                    episodeProgress = episodeProgress,
                     horizontalPadding = KanimeSpacing.lg
                 )
             }
@@ -737,6 +756,7 @@ private fun DetailHeroMetaAndActions(
     activeSourceShortName: String,
     onToggleWatchlist: () -> Unit,
     onOpenSourceSheet: () -> Unit,
+    resumeTarget: ResumeTarget?,
     onPlayFirst: () -> Unit,
     onSwitchPlugin: (AnimeSourcePlugin) -> Unit
 ) {
@@ -874,7 +894,11 @@ private fun DetailHeroMetaAndActions(
         ) {
             val primaryLabel = when (sourceAvailability) {
                 is SourceAvailabilityState.Checking -> stringResource(R.string.detail_checking_source, activeSourceShortName)
-                is SourceAvailabilityState.Available -> stringResource(R.string.detail_start_watching)
+                is SourceAvailabilityState.Available -> when {
+                    resumeTarget == null -> stringResource(R.string.detail_start_watching)
+                    resumeTarget.isContinue -> stringResource(R.string.detail_continue_ep, resumeTarget.episode.episodeNumber)
+                    else -> stringResource(R.string.detail_play_ep, resumeTarget.episode.episodeNumber)
+                }
                 is SourceAvailabilityState.Unavailable -> if (recommendedPlugin != null) {
                     stringResource(R.string.detail_switch_to, recommendedPlugin.name.removeSuffix(" Extractor").trim())
                 } else {
@@ -1010,6 +1034,7 @@ private fun LazyListScope.detailTabItems(
     onOpenCharacter: (Int) -> Unit,
     onOpenAnimeByMalId: (Int, String, String?) -> Unit,
     onOpenExternalUrl: (String) -> Unit,
+    episodeProgress: Map<Int, EpisodeProgress>,
     horizontalPadding: androidx.compose.ui.unit.Dp
 ) {
     // Tab 0: Episodes
@@ -1045,7 +1070,8 @@ private fun LazyListScope.detailTabItems(
                     Box(modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 5.dp)) {
                         EpisodeCard(
                             episode = episode,
-                            onClick = { onPlayEpisode(episode) }
+                            onClick = { onPlayEpisode(episode) },
+                            progress = episodeProgress[episode.episodeNumber]
                         )
                     }
                 }
@@ -2142,4 +2168,35 @@ private fun DetailScreenPreview() {
             )
         }
     }
+}
+
+
+/** What the main Play button should start: [isContinue] = resume a half-watched episode. */
+internal data class ResumeTarget(
+    val episode: Episode,
+    val isContinue: Boolean
+)
+
+/**
+ * Picks the episode the Play button should open, from what the viewer watched last:
+ *  - half-watched episode -> "Continue Ep N"
+ *  - finished episode -> the next one ("Play Ep N+1")
+ *  - started but barely -> that same episode ("Play Ep N")
+ * Returns null when nothing was watched yet (button keeps its default "Play Ep 1").
+ */
+internal fun computeResumeTarget(
+    episodes: List<Episode>,
+    progress: Map<Int, EpisodeProgress>,
+    lastEpisodeNumber: Int?
+): ResumeTarget? {
+    if (episodes.isEmpty() || lastEpisodeNumber == null) return null
+    val last = episodes.firstOrNull { it.episodeNumber == lastEpisodeNumber } ?: return null
+    val p = progress[last.episodeNumber]
+    if (p != null && p.isWatched) {
+        val next = episodes
+            .filter { it.episodeNumber > last.episodeNumber }
+            .minByOrNull { it.episodeNumber }
+        return next?.let { ResumeTarget(it, isContinue = false) }
+    }
+    return ResumeTarget(last, isContinue = p != null && p.positionMs >= 3_000L)
 }

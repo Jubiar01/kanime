@@ -13,13 +13,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +47,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.kanime.app.R
+import com.kanime.app.data.api.EpisodeProgress
 import com.kanime.app.data.model.Episode
 import com.kanime.app.ui.theme.KAnimeTheme
 import com.kanime.app.ui.theme.KanimeGlass
@@ -61,7 +65,8 @@ import java.util.Locale
 fun EpisodeCard(
     episode: Episode,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    progress: EpisodeProgress? = null
 ) {
     val configuration = LocalConfiguration.current
     val locale = remember(configuration) {
@@ -84,9 +89,15 @@ fun EpisodeCard(
         heightDp = 68.dp
     )
 
-    val metaText = remember(episode.duration, episode.aired, locale) {
+    val isWatched = progress?.isWatched == true
+    val inProgress = progress?.isInProgress == true
+    val minutesLeft = if (inProgress) ((progress?.remainingMs ?: 0L) / 60_000L).toInt().coerceAtLeast(1) else 0
+    val minutesLeftText = if (inProgress) stringResource(R.string.episode_minutes_left, minutesLeft) else null
+
+    val metaText = remember(episode.duration, episode.aired, locale, minutesLeftText) {
         buildList {
-            if (episode.duration.isNotBlank()) add(episode.duration)
+            if (minutesLeftText != null) add(minutesLeftText)
+            else if (episode.duration.isNotBlank()) add(episode.duration)
             AnimeDateFormatter.formatEpisodeDate(episode.aired, locale)?.let { add(it) }
         }.joinToString(" · ")
     }
@@ -139,20 +150,45 @@ fun EpisodeCard(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
+                // Watched episodes are dimmed and get a check instead of the play badge
+                if (isWatched) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(colorScheme.scrim.copy(alpha = 0.50f))
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .align(Alignment.Center)
                         .size(34.dp)
                         .clip(CircleShape)
-                        .background(playBadgeBg),
+                        .background(if (isWatched) colorScheme.primaryContainer.copy(alpha = 0.92f) else playBadgeBg),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = stringResource(R.string.action_play),
-                        tint = playBadgeFg,
+                        imageVector = if (isWatched) Icons.Default.Check else Icons.Default.PlayArrow,
+                        contentDescription = stringResource(if (isWatched) R.string.episode_watched else R.string.action_play),
+                        tint = if (isWatched) colorScheme.onPrimaryContainer else playBadgeFg,
                         modifier = Modifier.size(20.dp)
                     )
+                }
+                // Thin progress bar along the bottom edge of the thumbnail
+                if (inProgress && progress != null) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .background(colorScheme.scrim.copy(alpha = 0.45f))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(progress.fraction.coerceIn(0f, 1f))
+                                .background(colorScheme.primary)
+                        )
+                    }
                 }
             }
 
@@ -204,7 +240,7 @@ fun EpisodeCard(
                     text = episode.title,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = colorScheme.onSurface,
+                    color = if (isWatched) colorScheme.onSurfaceVariant else colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

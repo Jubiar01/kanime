@@ -28,12 +28,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
@@ -85,6 +87,9 @@ import com.kanime.app.ui.theme.rememberReduceMotion
 import com.kanime.app.ui.viewmodel.AnimeUiState
 import com.kanime.app.ui.viewmodel.AnimeViewModel
 import com.kanime.app.ui.viewmodel.NavTab
+import com.kanime.app.ui.screens.ScheduleScreen
+import com.kanime.app.data.notify.EpisodeAlertPreferences
+import com.kanime.app.data.notify.EpisodeAlerts
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -118,6 +123,9 @@ class MainActivity : ComponentActivity() {
         OnboardingPreferences.init(applicationContext)
         CatalogConfig.init(applicationContext)
         WatchHistoryStore.init(applicationContext)
+        EpisodeAlertPreferences.init(applicationContext)
+        if (EpisodeAlertPreferences.isEnabled()) EpisodeAlerts.schedule(applicationContext)
+        handleNotificationIntent(intent)
 
         // Offload PackageManager + filesystem plugin inspection off the main thread
         lifecycleScope.launch {
@@ -172,6 +180,23 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    /** Tapping a "new episode" notification opens that anime's page. */
+    private fun handleNotificationIntent(intent: Intent?) {
+        val malId = intent?.getIntExtra(EpisodeAlerts.EXTRA_OPEN_MAL_ID, 0) ?: 0
+        if (malId <= 0) return
+        val title = intent?.getStringExtra(EpisodeAlerts.EXTRA_OPEN_TITLE).orEmpty().ifBlank { "Anime" }
+        val cover = intent?.getStringExtra(EpisodeAlerts.EXTRA_OPEN_COVER)
+        // Consume the extras so a later recreation of the activity does not re-open it
+        intent?.removeExtra(EpisodeAlerts.EXTRA_OPEN_MAL_ID)
+        viewModel.openAnimeByMalId(malId, title, cover)
     }
 
     override fun onPictureInPictureModeChanged(
@@ -308,6 +333,11 @@ fun KAnimeApp(
                         topContentPadding = topInsetPadding,
                         bottomContentPadding = bottomInsetPadding
                     )
+                    NavTab.SCHEDULE -> ScheduleScreen(
+                        animeViewModel = viewModel,
+                        topContentPadding = topInsetPadding,
+                        bottomContentPadding = bottomInsetPadding
+                    )
                     NavTab.WATCHLIST -> WatchlistScreen(
                         viewModel = viewModel,
                         uiState = uiState,
@@ -341,11 +371,13 @@ internal fun KAnimeShell(
     val exploreLabel = stringResource(R.string.nav_explore)
     val libraryLabel = stringResource(R.string.nav_watchlist)
     val settingsLabel = stringResource(R.string.nav_settings)
+    val scheduleLabel = stringResource(R.string.nav_schedule)
 
-    val navItems = remember(watchlistCount, homeLabel, exploreLabel, libraryLabel, settingsLabel) {
+    val navItems = remember(watchlistCount, homeLabel, exploreLabel, scheduleLabel, libraryLabel, settingsLabel) {
         listOf(
             GlassNavItem(NavTab.HOME.name, homeLabel, Icons.Filled.Home, Icons.Outlined.Home),
             GlassNavItem(NavTab.EXPLORE.name, exploreLabel, Icons.Filled.Explore, Icons.Outlined.Explore),
+            GlassNavItem(NavTab.SCHEDULE.name, scheduleLabel, Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
             GlassNavItem(NavTab.WATCHLIST.name, libraryLabel, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder, badgeCount = watchlistCount),
             GlassNavItem(NavTab.SETTINGS.name, settingsLabel, Icons.Filled.Settings, Icons.Outlined.Settings)
         )
