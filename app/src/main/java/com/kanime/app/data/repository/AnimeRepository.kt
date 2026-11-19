@@ -2,6 +2,7 @@ package com.kanime.app.data.repository
 
 import com.kanime.app.data.api.AnimeCatalogService
 import com.kanime.app.data.model.Anime
+import com.kanime.app.data.model.AnimeSeasonEntry
 import com.kanime.app.data.model.Episode
 import com.kanime.app.data.model.MalCharacter
 import com.kanime.app.data.model.MalCharacterDetails
@@ -285,4 +286,7 @@ object AnimeRepository {
 
     suspend fun loadMoreExtras(malId: Int): Triple<List<MalRecommendation>, List<MalLink>, List<MalLink>> =
         AnimeCatalogService.loadMoreExtras(malId)
+
+    suspend fun loadSeasons(malId: Int): List<AnimeSeasonEntry> =
+        AnimeCatalogService.loadSeasons(malId)
 }

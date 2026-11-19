@@ -154,6 +154,22 @@ data class MalRecommendation(
     val votes: Int
 )
 
+/**
+ * One entry of a franchise chain (prequel -> this -> sequel ...) shown in the detail screen's Seasons row.
+ * [label] is what the card says ("Season 2", "Movie", "OVA"); [isCurrent] marks the anime being viewed.
+ */
+@Immutable
+data class AnimeSeasonEntry(
+    val malId: Int,
+    val title: String,
+    val label: String,
+    val coverUrl: String?,
+    val episodes: Int?,
+    val year: Int?,
+    val format: String?,
+    val isCurrent: Boolean
+)
+
 @Immutable
 data class AnimeExtras(
     val characters: List<MalCharacter> = emptyList(),
@@ -163,7 +179,9 @@ data class AnimeExtras(
     val recommendations: List<MalRecommendation> = emptyList(),
     val externalLinks: List<MalLink> = emptyList(),
     val streamingPlatforms: List<MalLink> = emptyList(),
+    val seasons: List<AnimeSeasonEntry> = emptyList(),
     val charactersLoaded: Boolean = false,
     val mediaLoaded: Boolean = false,
-    val moreLoaded: Boolean = false
+    val moreLoaded: Boolean = false,
+    val seasonsLoaded: Boolean = false
 )

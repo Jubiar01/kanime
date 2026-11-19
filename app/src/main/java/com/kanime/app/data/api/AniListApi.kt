@@ -45,6 +45,23 @@ object AniListApi {
         val studio: String?
     )
 
+    /** One anime in a prequel/sequel chain (keyless AniList relations graph). */
+    data class AniListFranchiseEntry(
+        val anilistId: Int,
+        val malId: Int?,
+        val title: String,
+        val cover: String?,
+        val format: String?,
+        val episodes: Int?,
+        val year: Int?
+    )
+
+    private data class FranchiseNode(
+        val entry: AniListFranchiseEntry,
+        val prequels: List<Pair<Int, String?>>,
+        val sequels: List<Pair<Int, String?>>
+    )
+
     data class AniListSeasonResult(
         val season: String,
         val seasonYear: Int,
@@ -388,6 +405,109 @@ object AniListApi {
         val media = mediaObj?.let { parseMedia(it) }?.takeIf { it.id > 0 }
         CatalogCache.set(cacheKey, media, CatalogCache.Bucket.MAPPING)
         return media
+    }
+
+    // ── Franchise chain (prequel -> sequel) for the Seasons row ──────────────
+
+    private const val FRANCHISE_FIELDS = """
+        id
+        idMal
+        title { romaji english }
+        coverImage { large extraLarge }
+        format
+        episodes
+        seasonYear
+        relations { edges { relationType node { id type format } } }
+    """
+
+    private suspend fun fetchFranchiseNode(argName: String, value: Int): FranchiseNode? {
+        val query = "query (\$v: Int) { Media($argName: \$v, type: ANIME) { $FRANCHISE_FIELDS } }"
+        val vars = JSONObject().apply { put("v", value) }
+        val media = executeGraphQl(query, vars)?.optJSONObject("Media") ?: return null
+        val id = media.optInt("id").takeIf { it > 0 } ?: return null
+
+        val titleObj = media.optJSONObject("title")
+        val title = titleObj?.optString("english")?.takeIf { it.isNotBlank() && it != "null" }
+            ?: titleObj?.optString("romaji")?.takeIf { it.isNotBlank() && it != "null" }
+            ?: "Unknown"
+        val coverObj = media.optJSONObject("coverImage")
+        val cover = coverObj?.optString("extraLarge")?.takeIf { it.isNotBlank() && it != "null" }
+            ?: coverObj?.optString("large")?.takeIf { it.isNotBlank() && it != "null" }
+
+        val entry = AniListFranchiseEntry(
+            anilistId = id,
+            malId = if (media.isNull("idMal")) null else media.optInt("idMal").takeIf { it > 0 },
+            title = title,
+            cover = cover,
+            format = media.optString("format").takeIf { it.isNotBlank() && it != "null" },
+            episodes = if (media.isNull("episodes")) null else media.optInt("episodes").takeIf { it > 0 },
+            year = if (media.isNull("seasonYear")) null else media.optInt("seasonYear").takeIf { it > 0 }
+        )
+
+        val prequels = ArrayList<Pair<Int, String?>>()
+        val sequels = ArrayList<Pair<Int, String?>>()
+        val edges = media.optJSONObject("relations")?.optJSONArray("edges")
+        if (edges != null) {
+            for (i in 0 until edges.length()) {
+                val edge = edges.optJSONObject(i) ?: continue
+                val node = edge.optJSONObject("node") ?: continue
+                if (node.optString("type") != "ANIME") continue
+                val nodeId = node.optInt("id").takeIf { it > 0 } ?: continue
+                val nodeFormat = node.optString("format").takeIf { it.isNotBlank() && it != "null" }
+                when (edge.optString("relationType")) {
+                    "PREQUEL" -> prequels.add(nodeId to nodeFormat)
+                    "SEQUEL" -> sequels.add(nodeId to nodeFormat)
+                }
+            }
+        }
+        return FranchiseNode(entry, prequels, sequels)
+    }
+
+    /** Prefer a main-line show (TV / short / ONA) over movies, OVAs and specials when a node has several links. */
+    private fun pickFranchiseLink(links: List<Pair<Int, String?>>, visited: Set<Int>): Int? {
+        val open = links.filter { it.first !in visited }
+        if (open.isEmpty()) return null
+        return (open.firstOrNull { it.second == "TV" || it.second == "TV_SHORT" || it.second == "ONA" } ?: open.first()).first
+    }
+
+    /**
+     * The whole prequel -> sequel chain this anime belongs to, oldest first (including this anime).
+     * Keyless; one small AniList request per hop, cached for 24h.
+     */
+    suspend fun getFranchise(malId: Int): List<AniListFranchiseEntry> {
+        val cacheKey = "anilist:franchise:v1:mal:$malId"
+        CatalogCache.get<List<AniListFranchiseEntry>>(cacheKey)?.let { return it }
+
+        val start = fetchFranchiseNode("idMal", malId) ?: return emptyList()
+        val visited = mutableSetOf(start.entry.anilistId)
+
+        val before = ArrayList<AniListFranchiseEntry>()
+        var cursor = start
+        var hops = 0
+        while (hops < 8) {
+            val prevId = pickFranchiseLink(cursor.prequels, visited) ?: break
+            val prev = fetchFranchiseNode("id", prevId) ?: break
+            visited += prev.entry.anilistId
+            before.add(0, prev.entry)
+            cursor = prev
+            hops++
+        }
+
+        val chain = ArrayList<AniListFranchiseEntry>(before)
+        chain += start.entry
+        cursor = start
+        hops = 0
+        while (hops < 12) {
+            val nextId = pickFranchiseLink(cursor.sequels, visited) ?: break
+            val next = fetchFranchiseNode("id", nextId) ?: break
+            visited += next.entry.anilistId
+            chain += next.entry
+            cursor = next
+            hops++
+        }
+
+        CatalogCache.set(cacheKey, chain, CatalogCache.Bucket.MAPPING)
+        return chain
     }
 
     // ── Top Banners (malId -> bannerImage) ───────────────────────────────────

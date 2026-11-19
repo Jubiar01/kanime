@@ -2,6 +2,7 @@ package com.kanime.app.data.api
 
 import com.kanime.app.data.model.Anime
 import com.kanime.app.data.model.AnimeExtras
+import com.kanime.app.data.model.AnimeSeasonEntry
 import com.kanime.app.data.model.Episode
 import com.kanime.app.data.model.MalCharacter
 import com.kanime.app.data.model.MalCharacterDetails
@@ -581,6 +582,57 @@ object AnimeCatalogService {
             val streaming = MalScraperApi.getStreamingPlatforms(malId)
             Triple(recs, external, streaming)
         }
+
+    /**
+     * Seasons row data: the prequel/sequel chain of [malId] as labelled entries
+     * ("Season 1", "Season 2", "Movie", "OVA" ...). Empty when the anime stands alone.
+     */
+    suspend fun loadSeasons(malId: Int): List<AnimeSeasonEntry> = withContext(Dispatchers.IO) {
+        val chain = AniListApi.getFranchise(malId)
+        if (chain.size < 2) return@withContext emptyList()
+
+        val movieTotal = chain.count { it.format == "MOVIE" }
+        val ovaTotal = chain.count { it.format == "OVA" }
+        val specialTotal = chain.count { it.format == "SPECIAL" }
+        var seasonNo = 0
+        var movieNo = 0
+        var ovaNo = 0
+        var specialNo = 0
+
+        val entries = chain.mapNotNull { e ->
+            val entryMalId = e.malId ?: return@mapNotNull null
+            val label = when (e.format) {
+                "TV", "TV_SHORT", "ONA" -> {
+                    seasonNo++
+                    "Season $seasonNo"
+                }
+                "MOVIE" -> {
+                    movieNo++
+                    if (movieTotal > 1) "Movie $movieNo" else "Movie"
+                }
+                "OVA" -> {
+                    ovaNo++
+                    if (ovaTotal > 1) "OVA $ovaNo" else "OVA"
+                }
+                "SPECIAL" -> {
+                    specialNo++
+                    if (specialTotal > 1) "Special $specialNo" else "Special"
+                }
+                else -> e.title
+            }
+            AnimeSeasonEntry(
+                malId = entryMalId,
+                title = e.title,
+                label = label,
+                coverUrl = e.cover,
+                episodes = e.episodes,
+                year = e.year,
+                format = e.format,
+                isCurrent = entryMalId == malId
+            )
+        }
+        if (entries.size < 2) emptyList() else entries
+    }
 
     // ── ID Resolution Helpers ────────────────────────────────────────────────
 

@@ -286,6 +286,10 @@
     <string name="player_subtitle_sync">Subtitle Sync</string>
     <string name="player_subtitle_sync_hint">Adjust if captions appear early or late</string>
     <string name="player_subtitle_sync_reset">Reset</string>
+    <string name="detail_seasons">Seasons</string>
+    <string name="detail_seasons_posters">Posters</string>
+    <string name="detail_seasons_compact">Compact</string>
+    <string name="detail_season_episodes">%1$d ep</string>
     <string name="player_subtitle_auto_sync">Auto-sync</string>
     <string name="player_subtitle_sync_line">Sync to line</string>
     <string name="player_subtitle_sync_line_hint">Tap right when you hear a line begin</string>

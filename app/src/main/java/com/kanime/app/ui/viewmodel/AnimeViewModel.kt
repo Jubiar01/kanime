@@ -69,6 +69,7 @@ class AnimeViewModel : ViewModel() {
     private var detailJob: Job? = null
     private var extrasJob: Job? = null
     private var characterJob: Job? = null
+    private var seasonsJob: Job? = null
 
     val genres: List<String> = AnimeRepository.genres
 
@@ -153,6 +154,7 @@ class AnimeViewModel : ViewModel() {
         detailJob?.cancel()
         extrasJob?.cancel()
         characterJob?.cancel()
+        seasonsJob?.cancel()
 
         _uiState.update {
             it.copy(
@@ -311,6 +313,32 @@ class AnimeViewModel : ViewModel() {
         }
     }
 
+    /** Loads the prequel/sequel chain for the Seasons row. Safe to call repeatedly; runs once per opened anime. */
+    fun loadSeasonsForSelected() {
+        val anime = _uiState.value.selectedAnime ?: return
+        val malId = anime.malId ?: return
+        if (_uiState.value.selectedAnimeExtras.seasonsLoaded) return
+
+        seasonsJob?.cancel()
+        seasonsJob = viewModelScope.launch {
+            val seasons = try {
+                AnimeRepository.loadSeasons(malId)
+            } catch (_: Exception) {
+                emptyList()
+            }
+            _uiState.update { current ->
+                if (current.selectedAnime?.id == anime.id) {
+                    current.copy(
+                        selectedAnimeExtras = current.selectedAnimeExtras.copy(
+                            seasons = seasons,
+                            seasonsLoaded = true
+                        )
+                    )
+                } else current
+            }
+        }
+    }
+
     fun loadMoreForSelected() {
         val anime = _uiState.value.selectedAnime ?: return
         val malId = anime.malId ?: return
@@ -375,6 +403,7 @@ class AnimeViewModel : ViewModel() {
         detailJob?.cancel()
         extrasJob?.cancel()
         characterJob?.cancel()
+        seasonsJob?.cancel()
         _uiState.update {
             it.copy(
                 selectedAnime = null,

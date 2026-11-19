@@ -117,6 +117,7 @@ import com.kanime.app.ui.components.GlassChip
 import com.kanime.app.ui.components.GlassIconButton
 import com.kanime.app.ui.components.GlassSheet
 import com.kanime.app.ui.components.GlassSurface
+import com.kanime.app.ui.components.SeasonsSection
 import com.kanime.app.ui.components.ShimmerBox
 import com.kanime.app.ui.theme.KAnimeTheme
 import com.kanime.app.ui.theme.KanimeAmbientBackdrop
@@ -373,6 +374,10 @@ fun DetailScreen(
         anime.copy(episodeList = displayEpisodes)
     }
 
+    LaunchedEffect(anime.id, anime.malId, uiState.selectedAnimeExtras.seasonsLoaded) {
+        if (!uiState.selectedAnimeExtras.seasonsLoaded) viewModel.loadSeasonsForSelected()
+    }
+
     DetailScreenContent(
         anime = anime,
         displayEpisodes = displayEpisodes,
@@ -453,6 +458,7 @@ internal fun DetailScreenContent(
     val windowSize = LocalWindowSizeClass.current
     var isSynopsisExpanded by remember(anime.id) { mutableStateOf(false) }
     val compactListState = rememberLazyListState()
+    LaunchedEffect(anime.id) { compactListState.scrollToItem(0) }
     val topBarScrimAlpha = remember(compactListState) {
         derivedStateOf {
             if (compactListState.firstVisibleItemIndex > 0) 0.92f
@@ -1008,6 +1014,18 @@ private fun LazyListScope.detailTabItems(
 ) {
     // Tab 0: Episodes
     if (selectedTab == 0) {
+        // Seasons row (franchise chain) — only when the anime actually has other seasons / movies
+        if (extras.seasons.size > 1) {
+            item(key = "seasons_row", contentType = "seasons_row") {
+                SeasonsSection(
+                    seasons = extras.seasons,
+                    onSelect = { season ->
+                        if (!season.isCurrent) onOpenAnimeByMalId(season.malId, season.title, season.coverUrl)
+                    },
+                    horizontalPadding = horizontalPadding
+                )
+            }
+        }
         when (sourceAvailability) {
             is SourceAvailabilityState.Checking -> {
                 items(4) {
