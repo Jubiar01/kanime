@@ -30,3 +30,6 @@ if (file("kanimeheaven-plugin").exists()) {
 if (file("kopensubtitle-plugin").exists()) {
     include(":kopensubtitle-plugin")
 }
+if (file("kreanime-plugin").exists()) {
+    include(":kreanime-plugin")
+}

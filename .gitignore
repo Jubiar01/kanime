@@ -19,6 +19,10 @@ kanikoto-plugin/
 kanimeheaven-plugin/
 /kopensubtitle-plugin/
 kopensubtitle-plugin/
+/kreanime-plugin/
+kreanime-plugin/
+
+
 
 # Signing keys & credentials (keep private!)
 *.jks
