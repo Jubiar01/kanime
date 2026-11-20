@@ -29,6 +29,9 @@ import com.kanime.app.MainActivity
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -1746,8 +1749,8 @@ fun PlayerDialog(
                             // Portrait Player Controls Overlay (liquid glass)
                             androidx.compose.animation.AnimatedVisibility(
                                 visible = showControls,
-                                enter = fadeIn(),
-                                exit = fadeOut(),
+                                enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.98f, animationSpec = tween(220)),
+                                exit = fadeOut(tween(160)),
                                 modifier = Modifier.fillMaxSize()
                             ) {
                                 Box(modifier = Modifier.fillMaxSize()) {
@@ -1812,12 +1815,14 @@ fun PlayerDialog(
                                             .align(Alignment.Center)
                                             .size(60.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                            contentDescription = if (isPlaying) "Pause" else "Play",
-                                            tint = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(34.dp)
-                                        )
+                                        Crossfade(targetState = isPlaying, animationSpec = tween(180), label = "PlayPause") { playing ->
+                                            Icon(
+                                                imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                contentDescription = if (playing) "Pause" else "Play",
+                                                tint = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.size(34.dp)
+                                            )
+                                        }
                                     }
 
                                     // Bottom: seek bar with time + PiP + fullscreen on one line
@@ -1836,6 +1841,7 @@ fun PlayerDialog(
                                                 currentPositionMs = newPos
                                             },
                                             segments = seekSegments,
+                                                bufferedProvider = { exoPlayer.bufferedPosition.coerceAtLeast(0L) },
                                             modifier = Modifier.weight(1f)
                                         )
                                         PlayerIconButton(
@@ -2280,8 +2286,8 @@ fun PlayerDialog(
                         // ══════════════════════════════════════════════════════════════
                         AnimatedVisibility(
                             visible = showControls,
-                            enter = fadeIn(),
-                            exit = fadeOut(),
+                            enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.98f, animationSpec = tween(220)),
+                            exit = fadeOut(tween(160)),
                             modifier = Modifier.fillMaxSize()
                         ) {
                             Box(modifier = Modifier.fillMaxSize()) {
@@ -2385,13 +2391,6 @@ fun PlayerDialog(
                                                 iconSize = 22.dp
                                             )
                                             PlayerIconButton(
-                                                icon = Icons.Default.PictureInPictureAlt,
-                                                contentDescription = "PiP",
-                                                onClick = { enterPipMode() },
-                                                size = 40.dp,
-                                                iconSize = 20.dp
-                                            )
-                                            PlayerIconButton(
                                                 icon = Icons.Default.Speed,
                                                 contentDescription = "Speed",
                                                 onClick = { showSpeedSheet = true },
@@ -2430,12 +2429,14 @@ fun PlayerDialog(
                                             overMedia = true,
                                             modifier = Modifier.size(76.dp)
                                         ) {
-                                            Icon(
-                                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                contentDescription = if (isPlaying) "Pause" else "Play",
-                                                tint = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.size(40.dp)
-                                            )
+                                            Crossfade(targetState = isPlaying, animationSpec = tween(180), label = "PlayPause") { playing ->
+                                                Icon(
+                                                    imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                    contentDescription = if (playing) "Pause" else "Play",
+                                                    tint = MaterialTheme.colorScheme.onSurface,
+                                                    modifier = Modifier.size(40.dp)
+                                                )
+                                            }
                                         }
 
                                         PlayerIconButton(
@@ -2469,7 +2470,8 @@ fun PlayerDialog(
                                                     exoPlayer.seekTo(newPos)
                                                     currentPositionMs = newPos
                                                 },
-                                                segments = seekSegments
+                                                segments = seekSegments,
+                                                bufferedProvider = { exoPlayer.bufferedPosition.coerceAtLeast(0L) }
                                             )
 
                                             Row(

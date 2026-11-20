@@ -1,12 +1,18 @@
 package com.kanime.app.ui.player
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,13 +40,23 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.util.Locale
+import kotlin.math.abs
 
 /**
  * Soft top + bottom gradient scrims for the player HUD. Replaces the old flat 40% black wash so the
@@ -88,21 +104,41 @@ fun PlayerIconButton(
     enabled: Boolean = true,
     tint: Color? = null
 ) {
-    val resolvedTint = when {
-        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.32f)
+    val scheme = MaterialTheme.colorScheme
+    val targetTint = when {
+        !enabled -> scheme.onSurface.copy(alpha = 0.32f)
         tint != null -> tint
-        active -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.onSurface
+        active -> scheme.primary
+        else -> scheme.onSurface
     }
+    val targetBg = if (active && enabled) scheme.primary.copy(alpha = 0.22f) else Color.Transparent
+    val resolvedTint by animateColorAsState(targetTint, label = "PlayerIconTint")
+    val background by animateColorAsState(targetBg, label = "PlayerIconBg")
+
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.88f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "PlayerIconPress"
+    )
+
     Box(
         modifier = modifier
             .size(size)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .clip(CircleShape)
-            .background(
-                if (active && enabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
-                else Color.Transparent
-            )
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+            .background(background)
+            .clickable(
+                interactionSource = interaction,
+                indication = LocalIndication.current,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick
+            ),
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -115,12 +151,15 @@ fun PlayerIconButton(
 }
 
 /**
- * Seek bar with elapsed / total time built in (custom-drawn, so it does not depend on the Slider API).
+ * Seek bar with elapsed / remaining time built in (custom-drawn, so it does not depend on the Slider API).
  *
  *  - Only seeks when the finger is lifted (no stuttering through every drag step on network streams).
- *  - The time on the left follows the thumb while scrubbing.
- *  - [segments] (intro / recap / outro in ms) are drawn as lighter marks on the track so you can see
- *    where they are at a glance.
+ *  - While scrubbing, the left time follows the thumb and the right label shows how far you are
+ *    jumping (+0:23 / −1:05). A soft haptic tick marks grab and release.
+ *  - Tap the right-hand time to switch between total duration and time remaining.
+ *  - [bufferedProvider] draws how far the stream has buffered as a faint layer under the progress.
+ *  - [segments] (intro / recap / outro in ms) are drawn as lighter marks on the track.
+ *  - Exposes progress semantics so TalkBack can adjust it.
  */
 @Composable
 fun PlayerSeekBar(
@@ -128,16 +167,22 @@ fun PlayerSeekBar(
     durationProvider: () -> Long,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
-    segments: List<LongRange> = emptyList()
+    segments: List<LongRange> = emptyList(),
+    bufferedProvider: () -> Long = { 0L }
 ) {
     val duration = durationProvider().coerceAtLeast(0L)
     val position = positionProvider().coerceAtLeast(0L)
+    val buffered = bufferedProvider().coerceAtLeast(0L)
 
     var scrub by remember { mutableStateOf<Float?>(null) }
+    var showRemaining by remember { mutableStateOf(false) }
     val active = scrub != null
+    val haptic = LocalHapticFeedback.current
 
     val fraction = scrub ?: if (duration > 0L) (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
+    val bufferedFraction = if (duration > 0L) (buffered.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
     val shownMs = if (duration > 0L) (fraction * duration).toLong() else 0L
+    val deltaMs = if (active) shownMs - position else 0L
 
     val thumbSize by animateDpAsState(
         targetValue = if (active) 20.dp else 14.dp,
@@ -154,10 +199,17 @@ fun PlayerSeekBar(
     val latestOnSeek by rememberUpdatedState(onSeek)
 
     val primary = MaterialTheme.colorScheme.primary
-    val inactive = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.24f)
-    val segmentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
+    val inactive = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.20f)
+    val bufferedColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f)
+    val segmentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
     val timeStyle = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum")
     val onSurface = MaterialTheme.colorScheme.onSurface
+
+    val rightText = when {
+        active -> (if (deltaMs >= 0L) "+" else "\u2212") + formatPlayerTime(abs(deltaMs))
+        showRemaining -> "\u2212" + formatPlayerTime((duration - shownMs).coerceAtLeast(0L))
+        else -> formatPlayerTime(duration)
+    }
 
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -175,7 +227,19 @@ fun PlayerSeekBar(
             modifier = Modifier
                 .weight(1f)
                 .padding(horizontal = 6.dp)
-                .height(32.dp)
+                .height(40.dp)
+                .semantics {
+                    contentDescription = "Seek bar"
+                    progressBarRangeInfo = ProgressBarRangeInfo(fraction, 0f..1f)
+                    setProgress { target ->
+                        if (latestDuration > 0L) {
+                            latestOnSeek((target.coerceIn(0f, 1f) * latestDuration).toLong())
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
                 .pointerInput(Unit) {
                     val inset = 10.dp.toPx()
                     fun fractionAt(x: Float): Float {
@@ -197,7 +261,10 @@ fun PlayerSeekBar(
                         return ((x - inset) / usable).coerceIn(0f, 1f)
                     }
                     detectHorizontalDragGestures(
-                        onDragStart = { offset -> scrub = fractionAt(offset.x) },
+                        onDragStart = { offset ->
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            scrub = fractionAt(offset.x)
+                        },
                         onHorizontalDrag = { change, _ ->
                             change.consume()
                             scrub = fractionAt(change.position.x)
@@ -207,6 +274,7 @@ fun PlayerSeekBar(
                             if (target != null && latestDuration > 0L) {
                                 latestOnSeek((target * latestDuration).toLong())
                             }
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             scrub = null
                         },
                         onDragCancel = { scrub = null }
@@ -226,6 +294,14 @@ fun PlayerSeekBar(
                     size = Size(usable, h),
                     cornerRadius = radius
                 )
+                if (bufferedFraction > 0f) {
+                    drawRoundRect(
+                        color = bufferedColor,
+                        topLeft = Offset(inset, top),
+                        size = Size(usable * bufferedFraction, h),
+                        cornerRadius = radius
+                    )
+                }
                 if (duration > 0L) {
                     segments.forEach { range ->
                         val s = (range.first.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
@@ -248,19 +324,34 @@ fun PlayerSeekBar(
                         cornerRadius = radius
                     )
                 }
+                val thumbCenter = Offset(inset + usable * fraction, size.height / 2f)
+                if (active) {
+                    drawCircle(
+                        color = primary.copy(alpha = 0.22f),
+                        radius = thumbSize.toPx() * 0.9f,
+                        center = thumbCenter
+                    )
+                }
                 drawCircle(
                     color = primary,
                     radius = thumbSize.toPx() / 2f,
-                    center = Offset(inset + usable * fraction, size.height / 2f)
+                    center = thumbCenter
                 )
             }
         }
 
         Text(
-            text = formatPlayerTime(duration),
-            color = onSurface.copy(alpha = 0.72f),
+            text = rightText,
+            color = if (active) primary else onSurface.copy(alpha = 0.72f),
             style = timeStyle,
-            modifier = Modifier.widthIn(min = 40.dp)
+            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+            modifier = Modifier
+                .widthIn(min = 44.dp)
+                .clip(CircleShape)
+                .clickable(enabled = !active, role = Role.Button) { showRemaining = !showRemaining }
+                .padding(horizontal = 4.dp, vertical = 6.dp)
         )
     }
 }
