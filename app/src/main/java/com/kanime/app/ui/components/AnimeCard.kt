@@ -153,8 +153,8 @@ fun AnimeCard(
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(MaterialTheme.shapes.medium)
-            .then(if (focusBorder != null) Modifier.border(focusBorder, MaterialTheme.shapes.medium) else Modifier)
+            .clip(MaterialTheme.shapes.large)
+            .then(if (focusBorder != null) Modifier.border(focusBorder, MaterialTheme.shapes.large) else Modifier)
             .hoverable(interactionSource)
             .focusable(interactionSource = interactionSource)
             .semantics(mergeDescendants = true) {
@@ -171,8 +171,12 @@ fun AnimeCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .clip(MaterialTheme.shapes.medium)
+                .clip(MaterialTheme.shapes.large)
                 .background(colorScheme.surfaceContainerHigh)
+                .border(
+                    BorderStroke(1.dp, colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                    MaterialTheme.shapes.large
+                )
         ) {
             AsyncImage(
                 model = coverRequest,

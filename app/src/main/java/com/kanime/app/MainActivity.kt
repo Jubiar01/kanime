@@ -427,7 +427,13 @@ internal fun KAnimeShell(
             }
         } else {
             Box(modifier = Modifier.fillMaxSize()) {
-                val topPad = if (showChrome) 76.dp else 0.dp
+                // Explore has no app-name toolbar: its search field is the header.
+                val showTopBar = showChrome && currentTab != NavTab.EXPLORE
+                val topPad = when {
+                    showTopBar -> 76.dp
+                    showChrome -> 8.dp
+                    else -> 0.dp
+                }
                 val bottomPad = if (showChrome) 104.dp else 0.dp
 
                 Box(
@@ -445,41 +451,43 @@ internal fun KAnimeShell(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                    GlassTopBar(
-                        title = {
-                            Text(
-                                text = buildAnnotatedString {
-                                    withStyle(
-                                        SpanStyle(
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.Black
-                                        )
-                                    ) {
-                                        append("K")
-                                    }
-                                    withStyle(
-                                        SpanStyle(
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    ) {
-                                        append("anime")
-                                    }
-                                },
-                                style = MaterialTheme.typography.titleLarge
-                            )
-                        },
-                        actions = {
-                            IconButton(onClick = onToggleTheme) {
-                                Icon(
-                                    imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                    contentDescription = stringResource(R.string.action_toggle_theme),
-                                    tint = MaterialTheme.colorScheme.onSurface
+                    if (showTopBar) {
+                        GlassTopBar(
+                            title = {
+                                Text(
+                                    text = buildAnnotatedString {
+                                        withStyle(
+                                            SpanStyle(
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Black
+                                            )
+                                        ) {
+                                            append("K")
+                                        }
+                                        withStyle(
+                                            SpanStyle(
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        ) {
+                                            append("anime")
+                                        }
+                                    },
+                                    style = MaterialTheme.typography.titleLarge
                                 )
-                            }
-                        },
-                        modifier = Modifier.align(Alignment.TopCenter)
-                    )
+                            },
+                            actions = {
+                                IconButton(onClick = onToggleTheme) {
+                                    Icon(
+                                        imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                        contentDescription = stringResource(R.string.action_toggle_theme),
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            },
+                            modifier = Modifier.align(Alignment.TopCenter)
+                        )
+                    }
 
                     GlassBottomBar(
                         items = navItems,
