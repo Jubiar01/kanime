@@ -3,6 +3,7 @@ package com.kanime.app.ui.components
 import android.content.res.Configuration
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -102,6 +104,17 @@ fun EpisodeCard(
         }.joinToString(" · ")
     }
 
+    // "24m" -> "24:00" so it reads as a runtime badge; anything else is shown as-is
+    val durationBadge = remember(episode.duration) {
+        val raw = episode.duration.trim()
+        val mins = Regex("^(\\d+)\\s*m(in)?$", RegexOption.IGNORE_CASE).find(raw)?.groupValues?.get(1)
+        when {
+            raw.isBlank() -> null
+            mins != null -> "$mins:00"
+            else -> raw
+        }
+    }
+
     val playBadgeBg = if (glass.isDark) {
         colorScheme.surfaceContainerLowest.copy(alpha = 0.78f)
     } else {
@@ -139,7 +152,7 @@ fun EpisodeCard(
         ) {
             Box(
                 modifier = Modifier
-                    .width(120.dp)
+                    .width(132.dp)
                     .aspectRatio(16f / 9f)
                     .clip(MaterialTheme.shapes.small)
                     .background(colorScheme.surfaceContainerHighest)
@@ -150,28 +163,46 @@ fun EpisodeCard(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
-                // Watched episodes are dimmed and get a check instead of the play badge
+                // Watched episodes are dimmed and get a check badge
                 if (isWatched) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(colorScheme.scrim.copy(alpha = 0.50f))
                     )
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(colorScheme.primaryContainer.copy(alpha = 0.92f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = stringResource(R.string.episode_watched),
+                            tint = colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(if (isWatched) colorScheme.primaryContainer.copy(alpha = 0.92f) else playBadgeBg),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isWatched) Icons.Default.Check else Icons.Default.PlayArrow,
-                        contentDescription = stringResource(if (isWatched) R.string.episode_watched else R.string.action_play),
-                        tint = if (isWatched) colorScheme.onPrimaryContainer else playBadgeFg,
-                        modifier = Modifier.size(20.dp)
-                    )
+                // Runtime badge (bottom-end)
+                if (durationBadge != null) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(start = 6.dp, end = 6.dp, bottom = if (inProgress) 8.dp else 6.dp)
+                            .clip(PillShape)
+                            .background(playBadgeBg)
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = durationBadge,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = playBadgeFg
+                        )
+                    }
                 }
                 // Thin progress bar along the bottom edge of the thumbnail
                 if (inProgress && progress != null) {
@@ -246,14 +277,44 @@ fun EpisodeCard(
                 )
 
                 if (metaText.isNotBlank()) {
-                    Text(
-                        text = metaText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CalendarMonth,
+                            contentDescription = null,
+                            tint = colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = metaText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
+            }
+
+            Spacer(modifier = Modifier.width(KanimeSpacing.sm))
+
+            // Trailing circular play button
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(colorScheme.surfaceContainerHighest.copy(alpha = 0.9f))
+                    .border(BorderStroke(1.dp, colorScheme.outlineVariant.copy(alpha = 0.5f)), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = stringResource(R.string.action_play),
+                    tint = colorScheme.onSurface,
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
     }

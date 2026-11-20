@@ -135,7 +135,7 @@
     <string name="history_started">Started</string>
 
     <!-- Detail -->
-    <string name="detail_start_watching">Play Ep 1</string>
+    <string name="detail_start_watching">Watch Now</string>
     <string name="detail_checking_source">Checking %1$s…</string>
     <string name="detail_select_source">Select Source</string>
     <string name="detail_switch_to">Switch to %1$s</string>
@@ -320,4 +320,9 @@
     <string name="player_subtitle_sync_line">Sync to line</string>
     <string name="player_subtitle_sync_line_hint">Tap right when you hear a line begin</string>
     <string name="player_hardsub_notice">Burned-in subtitles encoded inside the video file (common on AnimeHeaven) cannot be hidden by the player.</string>
+    <string name="action_share">Share</string>
+    <string name="detail_tab_details">Details</string>
+    <string name="detail_tab_more_info">More Info</string>
+    <string name="detail_add_watchlist">Add to Watchlist</string>
+    <string name="detail_in_watchlist">In Watchlist</string>
 </resources>
