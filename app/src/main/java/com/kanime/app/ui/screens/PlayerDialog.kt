@@ -865,7 +865,9 @@ fun PlayerDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 28.dp, vertical = 24.dp),
+                            .verticalScroll(rememberScrollState())
+                            .safeDrawingPadding()
+                            .padding(horizontal = 24.dp, vertical = 24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
@@ -926,7 +928,9 @@ fun PlayerDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(32.dp),
+                            .verticalScroll(rememberScrollState())
+                            .safeDrawingPadding()
+                            .padding(horizontal = 24.dp, vertical = 24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
@@ -941,16 +945,22 @@ fun PlayerDialog(
                             text = "Streaming Unavailable",
                             color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = state.message,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                            style = MaterialTheme.typography.bodyMedium
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.widthIn(max = 420.dp)
                         )
                         Spacer(modifier = Modifier.height(24.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
                             FilledTonalButton(onClick = { resolveStream() }) {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -1816,13 +1826,33 @@ fun PlayerDialog(
                         )
                     } else {
                         // ──────────────────────────────────────────────────────────
-                        // LANDSCAPE MODE (100% Immersive Fullscreen HUD)
+                        // LANDSCAPE MODE (Responsive Fullscreen HUD with Cutout Safety)
                         // ──────────────────────────────────────────────────────────
-                        Box(
+                        BoxWithConstraints(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .background(MaterialTheme.colorScheme.scrim)
                         ) {
+                            val isCompactLandscape = maxWidth < 640.dp || maxHeight < 360.dp
+                            val isTabletLandscape = maxWidth >= 900.dp
+                            val hudHorizontalPadding = when {
+                                isTabletLandscape -> 36.dp
+                                isCompactLandscape -> 12.dp
+                                else -> 24.dp
+                            }
+                            val dockButtonSize = if (isCompactLandscape) 36.dp else 44.dp
+                            val dockIconSize = if (isCompactLandscape) 19.dp else 22.dp
+                            val centerPlaySize = when {
+                                isCompactLandscape -> 62.dp
+                                isTabletLandscape -> 84.dp
+                                else -> 76.dp
+                            }
+                            val centerTransportSpacing = when {
+                                isCompactLandscape -> 24.dp
+                                isTabletLandscape -> 48.dp
+                                else -> 36.dp
+                            }
+
                             VideoSurface(modifier = Modifier.fillMaxSize())
 
                             Box(
@@ -1895,7 +1925,8 @@ fun PlayerDialog(
                                 exit = fadeOut(),
                                 modifier = Modifier
                                     .align(if (gestureType == "brightness") Alignment.CenterStart else Alignment.CenterEnd)
-                                    .padding(horizontal = 40.dp)
+                                    .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+                                    .padding(horizontal = if (isCompactLandscape) 20.dp else 40.dp)
                             ) {
                                 GlassSurface(
                                     shape = MaterialTheme.shapes.large,
@@ -1915,7 +1946,7 @@ fun PlayerDialog(
                                         Box(
                                             modifier = Modifier
                                                 .width(6.dp)
-                                                .height(110.dp)
+                                                .height(if (isCompactLandscape) 84.dp else 110.dp)
                                                 .clip(PillShape)
                                                 .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)),
                                             contentAlignment = Alignment.BottomCenter
@@ -1954,7 +1985,8 @@ fun PlayerDialog(
                                             overMedia = true,
                                             modifier = Modifier
                                                 .align(Alignment.TopEnd)
-                                                .padding(top = 20.dp, end = 36.dp)
+                                                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+                                                .padding(top = 20.dp, end = hudHorizontalPadding)
                                                 .size(48.dp)
                                         ) {
                                             Icon(Icons.Default.Lock, contentDescription = "Unlock", tint = MaterialTheme.colorScheme.onSurface)
@@ -1965,8 +1997,10 @@ fun PlayerDialog(
                                             overMedia = true,
                                             modifier = Modifier
                                                 .align(Alignment.TopCenter)
+                                                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+                                                .widthIn(max = 1040.dp)
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 28.dp, vertical = 12.dp)
+                                                .padding(horizontal = hudHorizontalPadding, vertical = if (isCompactLandscape) 8.dp else 12.dp)
                                         ) {
                                             Row(
                                                 modifier = Modifier
@@ -1978,8 +2012,8 @@ fun PlayerDialog(
                                                     icon = Icons.Default.KeyboardArrowDown,
                                                     contentDescription = "Collapse",
                                                     onClick = { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT },
-                                                    size = 44.dp,
-                                                    iconSize = 30.dp
+                                                    size = dockButtonSize,
+                                                    iconSize = if (isCompactLandscape) 24.dp else 30.dp
                                                 )
 
                                                 Spacer(modifier = Modifier.width(4.dp))
@@ -2004,14 +2038,14 @@ fun PlayerDialog(
 
                                                 Box(
                                                     modifier = Modifier
-                                                        .padding(horizontal = 6.dp)
+                                                        .padding(horizontal = 4.dp)
                                                         .clip(PillShape)
                                                         .background(
                                                             if (isVideoEnhanced) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
                                                             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
                                                         )
                                                         .clickable { showEnhanceSheet = true }
-                                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                                        .padding(horizontal = if (isCompactLandscape) 8.dp else 10.dp, vertical = 5.dp)
                                                 ) {
                                                     Text(
                                                         text = qualityBadgeText,
@@ -2027,8 +2061,8 @@ fun PlayerDialog(
                                                     contentDescription = "Anime4K Upscaler",
                                                     onClick = { showEnhanceSheet = true },
                                                     active = isVideoEnhanced,
-                                                    size = 40.dp,
-                                                    iconSize = 20.dp
+                                                    size = dockButtonSize,
+                                                    iconSize = dockIconSize
                                                 )
                                                 PlayerIconButton(
                                                     icon = Icons.AutoMirrored.Filled.PlaylistPlay,
@@ -2039,23 +2073,23 @@ fun PlayerDialog(
                                                         aspectRatioToastMessage = if (nextState) "Auto-Play: ON" else "Auto-Play: OFF"
                                                     },
                                                     active = autoPlayNext,
-                                                    size = 40.dp,
-                                                    iconSize = 22.dp
+                                                    size = dockButtonSize,
+                                                    iconSize = dockIconSize
                                                 )
                                                 PlayerIconButton(
                                                     icon = Icons.Default.Speed,
                                                     contentDescription = "Speed",
                                                     onClick = { showSpeedSheet = true },
                                                     active = playbackSpeed != 1.0f,
-                                                    size = 40.dp,
-                                                    iconSize = 20.dp
+                                                    size = dockButtonSize,
+                                                    iconSize = dockIconSize
                                                 )
                                                 PlayerIconButton(
                                                     icon = Icons.Default.LockOpen,
                                                     contentDescription = "Lock controls",
                                                     onClick = { isControlsLocked = true },
-                                                    size = 40.dp,
-                                                    iconSize = 20.dp
+                                                    size = dockButtonSize,
+                                                    iconSize = dockIconSize
                                                 )
                                             }
                                         }
@@ -2063,29 +2097,29 @@ fun PlayerDialog(
                                         Row(
                                             modifier = Modifier.align(Alignment.Center),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(36.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(centerTransportSpacing)
                                         ) {
                                             PlayerIconButton(
                                                 icon = Icons.Default.SkipPrevious,
                                                 contentDescription = "Previous Episode",
                                                 onClick = { onPreviousEpisode?.invoke() },
                                                 enabled = onPreviousEpisode != null,
-                                                size = 56.dp,
-                                                iconSize = 36.dp
+                                                size = if (isCompactLandscape) 48.dp else 56.dp,
+                                                iconSize = if (isCompactLandscape) 30.dp else 36.dp
                                             )
 
                                             GlassSurface(
                                                 onClick = { if (isPlaying) pausePlayback() else resumeOrPlay() },
                                                 shape = CircleShape,
                                                 overMedia = true,
-                                                modifier = Modifier.size(76.dp)
+                                                modifier = Modifier.size(centerPlaySize)
                                             ) {
                                                 Crossfade(targetState = isPlaying, animationSpec = tween(180), label = "PlayPause") { playing ->
                                                     Icon(
                                                         imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
                                                         contentDescription = if (playing) "Pause" else "Play",
                                                         tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(40.dp)
+                                                        modifier = Modifier.size(if (isCompactLandscape) 32.dp else 40.dp)
                                                     )
                                                 }
                                             }
@@ -2095,8 +2129,8 @@ fun PlayerDialog(
                                                 contentDescription = "Next Episode",
                                                 onClick = { onNextEpisode?.invoke() },
                                                 enabled = onNextEpisode != null,
-                                                size = 56.dp,
-                                                iconSize = 36.dp
+                                                size = if (isCompactLandscape) 48.dp else 56.dp,
+                                                iconSize = if (isCompactLandscape) 30.dp else 36.dp
                                             )
                                         }
 
@@ -2105,13 +2139,24 @@ fun PlayerDialog(
                                             overMedia = true,
                                             modifier = Modifier
                                                 .align(Alignment.BottomCenter)
+                                                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+                                                .widthIn(max = 1040.dp)
                                                 .fillMaxWidth()
-                                                .padding(start = 28.dp, end = 28.dp, bottom = 16.dp)
+                                                .padding(
+                                                    start = hudHorizontalPadding,
+                                                    end = hudHorizontalPadding,
+                                                    bottom = if (isCompactLandscape) 10.dp else 16.dp
+                                                )
                                         ) {
                                             Column(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 4.dp)
+                                                    .padding(
+                                                        start = if (isCompactLandscape) 10.dp else 16.dp,
+                                                        end = if (isCompactLandscape) 10.dp else 16.dp,
+                                                        top = 6.dp,
+                                                        bottom = 4.dp
+                                                    )
                                             ) {
                                                 PlayerSeekBar(
                                                     positionProvider = { currentPositionMs },
@@ -2125,36 +2170,46 @@ fun PlayerDialog(
                                                 )
 
                                                 Row(
-                                                    modifier = Modifier.fillMaxWidth(),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .horizontalScroll(rememberScrollState()),
                                                     horizontalArrangement = Arrangement.SpaceBetween,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
                                                     Row(
                                                         verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                        horizontalArrangement = Arrangement.spacedBy(if (isCompactLandscape) 2.dp else 4.dp)
                                                     ) {
                                                         PlayerIconButton(
                                                             icon = Icons.Default.Tune,
                                                             contentDescription = "Player Settings",
-                                                            onClick = { showSpeedSheet = true }
+                                                            onClick = { showSettingsSheet = true },
+                                                            size = dockButtonSize,
+                                                            iconSize = dockIconSize
                                                         )
                                                         PlayerIconButton(
                                                             icon = Icons.Default.FolderOpen,
                                                             contentDescription = "Streams",
-                                                            onClick = { showStreamsSheet = true }
+                                                            onClick = { showStreamsSheet = true },
+                                                            size = dockButtonSize,
+                                                            iconSize = dockIconSize
                                                         )
                                                         PlayerIconButton(
                                                             icon = Icons.Default.Subtitles,
                                                             contentDescription = "Subtitles",
                                                             onClick = { showSubtitlesSheet = true },
                                                             active = subtitlesEnabled,
-                                                            tint = if (subtitlesEnabled) null else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                                            tint = if (subtitlesEnabled) null else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                                            size = dockButtonSize,
+                                                            iconSize = dockIconSize
                                                         )
                                                         PlayerIconButton(
                                                             icon = Icons.Default.MusicNote,
                                                             contentDescription = "Audio Track ($activeAudioShortLabel)",
                                                             onClick = { showAudioSheet = true },
-                                                            active = showAudioSheet
+                                                            active = showAudioSheet,
+                                                            size = dockButtonSize,
+                                                            iconSize = dockIconSize
                                                         )
                                                         if (useOpenSubtitle && subtitlesEnabled && openSubtitleTracks.isNotEmpty()) {
                                                             Box(
@@ -2185,42 +2240,55 @@ fun PlayerDialog(
                                                         }
                                                     }
 
+                                                    Spacer(modifier = Modifier.width(12.dp))
+
                                                     Row(
                                                         verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                        horizontalArrangement = Arrangement.spacedBy(if (isCompactLandscape) 2.dp else 4.dp)
                                                     ) {
                                                         PlayerIconButton(
                                                             icon = Icons.Default.Replay10,
                                                             contentDescription = "Back 10 seconds",
-                                                            onClick = { performDoubleTapSeek(-10) }
+                                                            onClick = { performDoubleTapSeek(-10) },
+                                                            size = dockButtonSize,
+                                                            iconSize = dockIconSize
                                                         )
                                                         PlayerIconButton(
                                                             icon = Icons.Default.Forward10,
                                                             contentDescription = "Forward 10 seconds",
-                                                            onClick = { performDoubleTapSeek(10) }
+                                                            onClick = { performDoubleTapSeek(10) },
+                                                            size = dockButtonSize,
+                                                            iconSize = dockIconSize
                                                         )
                                                     }
 
+                                                    Spacer(modifier = Modifier.width(12.dp))
+
                                                     Row(
                                                         verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                        horizontalArrangement = Arrangement.spacedBy(if (isCompactLandscape) 2.dp else 4.dp)
                                                     ) {
                                                         PlayerIconButton(
                                                             icon = Icons.Default.PictureInPicture,
                                                             contentDescription = "Picture-in-Picture",
-                                                            onClick = { enterPipMode() }
+                                                            onClick = { enterPipMode() },
+                                                            size = dockButtonSize,
+                                                            iconSize = dockIconSize
                                                         )
                                                         PlayerIconButton(
                                                             icon = Icons.Default.AspectRatio,
                                                             contentDescription = "Aspect Ratio",
                                                             onClick = { cycleAspectRatio() },
-                                                            active = pictureMode != VideoPictureMode.FIT || videoZoom > 1.01f
+                                                            active = pictureMode != VideoPictureMode.FIT || videoZoom > 1.01f,
+                                                            size = dockButtonSize,
+                                                            iconSize = dockIconSize
                                                         )
                                                         PlayerIconButton(
                                                             icon = Icons.Default.FullscreenExit,
                                                             contentDescription = "Exit Fullscreen",
                                                             onClick = { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT },
-                                                            iconSize = 24.dp
+                                                            size = dockButtonSize,
+                                                            iconSize = if (isCompactLandscape) 20.dp else 24.dp
                                                         )
                                                     }
                                                 }
@@ -2232,9 +2300,9 @@ fun PlayerDialog(
 
                             SkipSegmentOverlay(
                                 segment = if (isControlsLocked) null else activeSkipSegment,
-                                compact = false,
-                                bottomPadding = if (showControls) 152.dp else 28.dp,
-                                endPadding = 36.dp,
+                                compact = isCompactLandscape,
+                                bottomPadding = if (showControls) (if (isCompactLandscape) 124.dp else 148.dp) else 24.dp,
+                                endPadding = hudHorizontalPadding,
                                 onSkip = { seg ->
                                     val maxDur = exoPlayer.duration.coerceAtLeast(0L)
                                     val target = if (maxDur > 0L) seg.endMs.coerceAtMost(maxDur) else seg.endMs
@@ -2479,7 +2547,7 @@ fun PlayerDialog(
                     modifier = Modifier
                         .widthIn(max = 680.dp)
                         .fillMaxWidth()
-                        .fillMaxHeight(if (isLandscape) 0.88f else 0.65f),
+                        .fillMaxHeight(if (isLandscape) 0.90f else 0.65f),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                     shadowElevation = 16.dp
@@ -2487,6 +2555,7 @@ fun PlayerDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
+                            .navigationBarsPadding()
                             .padding(horizontal = 20.dp, vertical = 8.dp)
                     ) {
                         Box(
@@ -2647,7 +2716,7 @@ fun PlayerDialog(
                     modifier = Modifier
                         .widthIn(max = 680.dp)
                         .fillMaxWidth()
-                        .fillMaxHeight(if (isLandscape) 0.88f else 0.72f),
+                        .fillMaxHeight(if (isLandscape) 0.90f else 0.74f),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                     shadowElevation = 16.dp
@@ -2655,6 +2724,7 @@ fun PlayerDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
+                            .navigationBarsPadding()
                             .padding(horizontal = 20.dp, vertical = 8.dp)
                     ) {
                         Box(
@@ -3434,7 +3504,7 @@ fun PlayerDialog(
                     modifier = Modifier
                         .widthIn(max = 680.dp)
                         .fillMaxWidth()
-                        .fillMaxHeight(if (isLandscape) 0.82f else 0.56f),
+                        .fillMaxHeight(if (isLandscape) 0.88f else 0.58f),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                     shadowElevation = 16.dp
@@ -3442,6 +3512,7 @@ fun PlayerDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
+                            .navigationBarsPadding()
                             .padding(horizontal = 20.dp, vertical = 8.dp)
                     ) {
                         Box(
@@ -3673,7 +3744,7 @@ fun PlayerDialog(
                     modifier = Modifier
                         .widthIn(max = 680.dp)
                         .fillMaxWidth()
-                        .fillMaxHeight(if (isLandscape) 0.86f else 0.62f),
+                        .fillMaxHeight(if (isLandscape) 0.90f else 0.65f),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                     shadowElevation = 16.dp
@@ -3681,6 +3752,8 @@ fun PlayerDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
+                            .navigationBarsPadding()
+                            .imePadding()
                             .padding(horizontal = 20.dp, vertical = 8.dp)
                     ) {
                         Box(
@@ -3934,6 +4007,8 @@ fun PlayerDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .verticalScroll(rememberScrollState())
                             .padding(horizontal = 20.dp, vertical = 12.dp)
                     ) {
                         Box(
@@ -4016,6 +4091,7 @@ fun PlayerDialog(
                 ) {
                     Column(
                         modifier = Modifier
+                            .navigationBarsPadding()
                             .padding(horizontal = 20.dp, vertical = 12.dp)
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -4166,6 +4242,7 @@ fun PlayerDialog(
                 ) {
                     Column(
                         modifier = Modifier
+                            .navigationBarsPadding()
                             .padding(horizontal = 20.dp, vertical = 12.dp)
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
