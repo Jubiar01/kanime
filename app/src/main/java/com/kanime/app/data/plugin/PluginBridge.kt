@@ -50,6 +50,8 @@ object PluginBridge {
     private const val TAG = "PluginBridge"
     const val KANIKOTO_AUTHORITY = "com.kanime.plugin.kanikoto.provider"
     const val KANIKOTO_PACKAGE = "com.kanime.plugin.kanikoto"
+    const val KANIMAREVIVAL_AUTHORITY = "com.kanime.plugin.kanimarevival.provider"
+    const val KANIMAREVIVAL_PACKAGE = "com.kanime.plugin.kanimarevival"
     const val KOPENSUBTITLE_AUTHORITY = "com.kanime.plugin.kopensubtitle.provider"
     const val KOPENSUBTITLE_PACKAGE = "com.kanime.plugin.kopensubtitle"
 

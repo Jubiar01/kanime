@@ -33,3 +33,6 @@ if (file("kopensubtitle-plugin").exists()) {
 if (file("kreanime-plugin").exists()) {
     include(":kreanime-plugin")
 }
+if (file("kanimarevival-plugin").exists()) {
+    include(":kanimarevival-plugin")
+}

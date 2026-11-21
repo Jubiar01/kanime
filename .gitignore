@@ -11,7 +11,10 @@ local.properties
 /captures
 .externalNativeBuild
 .cxx
+.mp4
+document_6055573492705796769.mp4
 pub.txt
+scratch
 
 # Private plugin modules (excluded from public repo)
 /kanikoto-plugin/
@@ -22,6 +25,9 @@ kanimeheaven-plugin/
 kopensubtitle-plugin/
 /kreanime-plugin/
 kreanime-plugin/
+kanimarevival-plugin
+/kanimarevival-plugin/
+
 
 
 

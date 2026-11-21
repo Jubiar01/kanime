@@ -1022,6 +1022,9 @@ fun PlayerDialog(
                     val exoPlayer = remember(streamUrl, animeRebuildGeneration, videoEffectsDisabledByError) {
                         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
                             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
+                            .setAllowCrossProtocolRedirects(true)
+                            .setConnectTimeoutMs(15000)
+                            .setReadTimeoutMs(15000)
                             .setDefaultRequestProperties(
                                 mapOf(
                                     "Referer" to (stream.referer ?: "https://anikototv.bz/"),
@@ -1086,9 +1089,15 @@ fun PlayerDialog(
                             .setTrackSelector(trackSelector)
                             .setMediaSourceFactory(mediaSourceFactory)
                             .build().apply {
+                                val streamMimeType = when {
+                                    streamUrl.contains(".m3u8") || stream.type.equals("hls", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
+                                    stream.type.equals("mp4", ignoreCase = true) || streamUrl.contains(".mp4") || streamUrl.contains("googlevideo.com") -> MimeTypes.VIDEO_MP4
+                                    else -> null
+                                }
+
                                 val mediaItem = MediaItem.Builder()
                                     .setUri(Uri.parse(streamUrl))
-                                    .setMimeType(if (streamUrl.contains(".m3u8")) MimeTypes.APPLICATION_M3U8 else null)
+                                    .setMimeType(streamMimeType)
                                     .setSubtitleConfigurations(subtitleConfigs)
                                     .build()
 

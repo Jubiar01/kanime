@@ -1,10 +1,10 @@
 {
   "plugin_config_version": 1,
-  "release_date": "2026-11-18",
+  "release_date": "2026-11-21",
   "min_app_version": "1.0.0",
   "release_notes": [
-    "Initial KAnikoto catalog configuration",
-    "Supports HLS stream extraction and synchronized subtitles"
+    "Initial KAnikoto and Anime Revival configuration",
+    "Supports Tagalog-dubbed anime streaming from Anime Revival"
   ],
   "plugins": [
     {
