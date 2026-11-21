@@ -8,8 +8,11 @@ import android.app.PictureInPictureParams
 import android.app.RemoteAction
 import android.content.BroadcastReceiver
 import android.content.Context
+import com.kanime.app.ui.player.KanimeLandscapePlayerScreen
+import com.kanime.app.ui.player.KanimeLandscapeUiState
 import com.kanime.app.ui.player.KanimePortraitPlayerScreen
 import com.kanime.app.ui.player.KanimePlayerUiState
+import com.kanime.app.ui.player.LandscapePillOption
 import com.kanime.app.ui.player.PlayerEpisodeUiItem
 import android.content.Intent
 import android.content.IntentFilter
@@ -310,6 +313,7 @@ fun PlayerDialog(
     var showEnhanceSheet by remember { mutableStateOf(false) }
     var showPictureSheet by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
+    var showPlaybackSettingsModal by remember { mutableStateOf(false) }
 
     val activeAudioShortLabel = remember(embeddedAudioTracks, selectedEmbeddedAudioKey, selectedAudioType) {
         val activeEmbedded = embeddedAudioTracks.firstOrNull { it.key == selectedEmbeddedAudioKey }
@@ -586,7 +590,8 @@ fun PlayerDialog(
         showAudioSheet,
         showEnhanceSheet,
         showPictureSheet,
-        showSettingsSheet
+        showSettingsSheet,
+        showPlaybackSettingsModal
     ) {
         if (
             showControls &&
@@ -599,7 +604,8 @@ fun PlayerDialog(
             !showAudioSheet &&
             !showEnhanceSheet &&
             !showPictureSheet &&
-            !showSettingsSheet
+            !showSettingsSheet &&
+            !showPlaybackSettingsModal
         ) {
             delay(5000)
             showControls = false
@@ -715,12 +721,12 @@ fun PlayerDialog(
                     resolutionState = StreamResolutionState.Success(foundStream)
                 } else {
                     resolutionState = StreamResolutionState.Error("Unable to connect to streaming servers on ${activePlugin.name}. Please verify plugin is installed and active.")
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                resolutionState = StreamResolutionState.Error("${activePlugin.name} stream extraction error: ${e.message}")
-            }
+    // Native back press handling: close floating Playback Settings first, then exit landscape, then close player
+    BackHandler {
+        when {
+            showPlaybackSettingsModal -> showPlaybackSettingsModal = false
+            isLandscape -> activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else -> onDismiss()
         }
     }
 
@@ -1351,6 +1357,7 @@ fun PlayerDialog(
                         showEnhanceSheet = false
                         showPictureSheet = false
                         showSettingsSheet = false
+                        showPlaybackSettingsModal = false
                         try {
                             val vs = exoPlayer.videoSize
                             val params = buildPipParams(
@@ -1826,528 +1833,383 @@ fun PlayerDialog(
                         )
                     } else {
                         // ──────────────────────────────────────────────────────────
-                        // LANDSCAPE MODE (Responsive Fullscreen HUD with Cutout Safety)
+                        // LANDSCAPE MODE — Wired to KanimeLandscapePlayerScreen
                         // ──────────────────────────────────────────────────────────
-                        BoxWithConstraints(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.scrim)
-                        ) {
-                            val isCompactLandscape = maxWidth < 640.dp || maxHeight < 360.dp
-                            val isTabletLandscape = maxWidth >= 900.dp
-                            val hudHorizontalPadding = when {
-                                isTabletLandscape -> 36.dp
-                                isCompactLandscape -> 12.dp
-                                else -> 24.dp
-                            }
-                            val dockButtonSize = if (isCompactLandscape) 36.dp else 44.dp
-                            val dockIconSize = if (isCompactLandscape) 19.dp else 22.dp
-                            val centerPlaySize = when {
-                                isCompactLandscape -> 62.dp
-                                isTabletLandscape -> 84.dp
-                                else -> 76.dp
-                            }
-                            val centerTransportSpacing = when {
-                                isCompactLandscape -> 24.dp
-                                isTabletLandscape -> 48.dp
-                                else -> 36.dp
-                            }
+                        val landscapeQualityOptions = remember(availableServers, selectedServer, autoSelectStream, selectedAudioType) {
+                            val matchingServers = availableServers
+                                .filter { it.type.equals(selectedAudioType, ignoreCase = true) }
+                                .ifEmpty { availableServers }
+                                .distinctBy { it.name }
+                                .take(4)
 
-                            VideoSurface(modifier = Modifier.fillMaxSize())
-
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .pointerInput(exoPlayer, isControlsLocked) {
-                                        detectTapGestures(
-                                            onTap = {
-                                                if (!isControlsLocked) {
-                                                    showControls = !showControls
-                                                } else {
-                                                    showControls = true
-                                                }
-                                            },
-                                            onDoubleTap = { offset ->
-                                                if (!isControlsLocked) {
-                                                    when {
-                                                        offset.x < size.width * 0.45f -> performDoubleTapSeek(-10)
-                                                        offset.x > size.width * 0.55f -> performDoubleTapSeek(+10)
-                                                        else -> if (exoPlayer.isPlaying) pausePlayback() else resumeOrPlay()
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
-                                    .pointerInput(isControlsLocked) {
-                                        detectVerticalDragGestures(
-                                            onDragStart = { offset ->
-                                                if (isControlsLocked) return@detectVerticalDragGestures
-                                                if (offset.x < size.width * 0.45f) {
-                                                    gestureType = "brightness"
-                                                    gestureLevel = brightness
-                                                } else if (offset.x > size.width * 0.55f) {
-                                                    gestureType = "volume"
-                                                    gestureLevel = volume.toFloat() / maxVolume.toFloat()
-                                                }
-                                            },
-                                            onVerticalDrag = { change, dragAmount ->
-                                                if (isControlsLocked) return@detectVerticalDragGestures
-                                                change.consume()
-                                                if (gestureType == "brightness") {
-                                                    brightness = (brightness - (dragAmount / 350f)).coerceIn(0.01f, 1.0f)
-                                                    gestureLevel = brightness
-                                                    activity?.window?.attributes = activity.window.attributes.apply {
-                                                        screenBrightness = brightness
-                                                    }
-                                                } else if (gestureType == "volume") {
-                                                    val step = -(dragAmount / 25f).toInt()
-                                                    val newVol = (volume + step).coerceIn(0, maxVolume)
-                                                    if (newVol != volume) {
-                                                        volume = newVol
-                                                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, volume, 0)
-                                                        gestureLevel = volume.toFloat() / maxVolume.toFloat()
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
+                            val list = mutableListOf<LandscapePillOption>()
+                            list.add(
+                                LandscapePillOption(
+                                    id = "auto",
+                                    label = "Auto",
+                                    isSelected = autoSelectStream && selectedServer == null
+                                )
                             )
-
-                            DoubleTapSeekOverlay(
-                                side = doubleTapSeekSide,
-                                seconds = doubleTapSeekSeconds,
-                                compact = false
-                            )
-
-                            AnimatedVisibility(
-                                visible = gestureType != null,
-                                enter = fadeIn(),
-                                exit = fadeOut(),
-                                modifier = Modifier
-                                    .align(if (gestureType == "brightness") Alignment.CenterStart else Alignment.CenterEnd)
-                                    .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
-                                    .padding(horizontal = if (isCompactLandscape) 20.dp else 40.dp)
-                            ) {
-                                GlassSurface(
-                                    shape = MaterialTheme.shapes.large,
-                                    overMedia = true
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.padding(vertical = 14.dp, horizontal = 14.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (gestureType == "brightness") Icons.Default.BrightnessMedium else Icons.Default.VolumeUp,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(22.dp)
+                            if (matchingServers.isNotEmpty()) {
+                                matchingServers.forEach { srv ->
+                                    list.add(
+                                        LandscapePillOption(
+                                            id = "srv:${srv.sourceId}",
+                                            label = srv.name,
+                                            isSelected = selectedServer?.sourceId == srv.sourceId
                                         )
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .width(6.dp)
-                                                .height(if (isCompactLandscape) 84.dp else 110.dp)
-                                                .clip(PillShape)
-                                                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)),
-                                            contentAlignment = Alignment.BottomCenter
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .fillMaxHeight(gestureLevel.coerceIn(0f, 1f))
-                                                    .background(MaterialTheme.colorScheme.primary)
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Text(
-                                            text = "${(gestureLevel * 100).toInt()}%",
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
+                                    )
                                 }
+                            } else {
+                                list.add(
+                                    LandscapePillOption(
+                                        id = "preset:1080p",
+                                        label = "1080p",
+                                        isSelected = !autoSelectStream
+                                    )
+                                )
                             }
-
-                            AnimatedVisibility(
-                                visible = showControls,
-                                enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.98f, animationSpec = tween(220)),
-                                exit = fadeOut(tween(160)),
-                                modifier = Modifier.fillMaxSize()
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize()) {
-                                    PlayerScrims(locked = isControlsLocked)
-
-                                    if (isControlsLocked) {
-                                        GlassSurface(
-                                            onClick = { isControlsLocked = false },
-                                            shape = CircleShape,
-                                            overMedia = true,
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
-                                                .padding(top = 20.dp, end = hudHorizontalPadding)
-                                                .size(48.dp)
-                                        ) {
-                                            Icon(Icons.Default.Lock, contentDescription = "Unlock", tint = MaterialTheme.colorScheme.onSurface)
-                                        }
-                                    } else {
-                                        GlassSurface(
-                                            shape = PillShape,
-                                            overMedia = true,
-                                            modifier = Modifier
-                                                .align(Alignment.TopCenter)
-                                                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
-                                                .widthIn(max = 1040.dp)
-                                                .fillMaxWidth()
-                                                .padding(horizontal = hudHorizontalPadding, vertical = if (isCompactLandscape) 8.dp else 12.dp)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(horizontal = 6.dp, vertical = 4.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                PlayerIconButton(
-                                                    icon = Icons.Default.KeyboardArrowDown,
-                                                    contentDescription = "Collapse",
-                                                    onClick = { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT },
-                                                    size = dockButtonSize,
-                                                    iconSize = if (isCompactLandscape) 24.dp else 30.dp
-                                                )
-
-                                                Spacer(modifier = Modifier.width(4.dp))
-
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = formattedEpisodeHeading,
-                                                        color = MaterialTheme.colorScheme.onSurface,
-                                                        style = MaterialTheme.typography.titleSmall,
-                                                        fontWeight = FontWeight.Bold,
-                                                        maxLines = 1,
-                                                        modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
-                                                    )
-                                                    Text(
-                                                        text = anime.title,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        maxLines = 1,
-                                                        modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
-                                                    )
-                                                }
-
-                                                Box(
-                                                    modifier = Modifier
-                                                        .padding(horizontal = 4.dp)
-                                                        .clip(PillShape)
-                                                        .background(
-                                                            if (isVideoEnhanced) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
-                                                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
-                                                        )
-                                                        .clickable { showEnhanceSheet = true }
-                                                        .padding(horizontal = if (isCompactLandscape) 8.dp else 10.dp, vertical = 5.dp)
-                                                ) {
-                                                    Text(
-                                                        text = qualityBadgeText,
-                                                        color = if (isVideoEnhanced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        fontWeight = FontWeight.Bold,
-                                                        maxLines = 1
-                                                    )
-                                                }
-
-                                                PlayerIconButton(
-                                                    icon = Icons.Default.AutoAwesome,
-                                                    contentDescription = "Anime4K Upscaler",
-                                                    onClick = { showEnhanceSheet = true },
-                                                    active = isVideoEnhanced,
-                                                    size = dockButtonSize,
-                                                    iconSize = dockIconSize
-                                                )
-                                                PlayerIconButton(
-                                                    icon = Icons.AutoMirrored.Filled.PlaylistPlay,
-                                                    contentDescription = "Auto-Play Next",
-                                                    onClick = {
-                                                        val nextState = !autoPlayNext
-                                                        onToggleAutoPlayNext?.invoke(nextState)
-                                                        aspectRatioToastMessage = if (nextState) "Auto-Play: ON" else "Auto-Play: OFF"
-                                                    },
-                                                    active = autoPlayNext,
-                                                    size = dockButtonSize,
-                                                    iconSize = dockIconSize
-                                                )
-                                                PlayerIconButton(
-                                                    icon = Icons.Default.Speed,
-                                                    contentDescription = "Speed",
-                                                    onClick = { showSpeedSheet = true },
-                                                    active = playbackSpeed != 1.0f,
-                                                    size = dockButtonSize,
-                                                    iconSize = dockIconSize
-                                                )
-                                                PlayerIconButton(
-                                                    icon = Icons.Default.LockOpen,
-                                                    contentDescription = "Lock controls",
-                                                    onClick = { isControlsLocked = true },
-                                                    size = dockButtonSize,
-                                                    iconSize = dockIconSize
-                                                )
-                                            }
-                                        }
-
-                                        Row(
-                                            modifier = Modifier.align(Alignment.Center),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(centerTransportSpacing)
-                                        ) {
-                                            PlayerIconButton(
-                                                icon = Icons.Default.SkipPrevious,
-                                                contentDescription = "Previous Episode",
-                                                onClick = { onPreviousEpisode?.invoke() },
-                                                enabled = onPreviousEpisode != null,
-                                                size = if (isCompactLandscape) 48.dp else 56.dp,
-                                                iconSize = if (isCompactLandscape) 30.dp else 36.dp
-                                            )
-
-                                            GlassSurface(
-                                                onClick = { if (isPlaying) pausePlayback() else resumeOrPlay() },
-                                                shape = CircleShape,
-                                                overMedia = true,
-                                                modifier = Modifier.size(centerPlaySize)
-                                            ) {
-                                                Crossfade(targetState = isPlaying, animationSpec = tween(180), label = "PlayPause") { playing ->
-                                                    Icon(
-                                                        imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                        contentDescription = if (playing) "Pause" else "Play",
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(if (isCompactLandscape) 32.dp else 40.dp)
-                                                    )
-                                                }
-                                            }
-
-                                            PlayerIconButton(
-                                                icon = Icons.Default.SkipNext,
-                                                contentDescription = "Next Episode",
-                                                onClick = { onNextEpisode?.invoke() },
-                                                enabled = onNextEpisode != null,
-                                                size = if (isCompactLandscape) 48.dp else 56.dp,
-                                                iconSize = if (isCompactLandscape) 30.dp else 36.dp
-                                            )
-                                        }
-
-                                        GlassSurface(
-                                            shape = MaterialTheme.shapes.extraLarge,
-                                            overMedia = true,
-                                            modifier = Modifier
-                                                .align(Alignment.BottomCenter)
-                                                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
-                                                .widthIn(max = 1040.dp)
-                                                .fillMaxWidth()
-                                                .padding(
-                                                    start = hudHorizontalPadding,
-                                                    end = hudHorizontalPadding,
-                                                    bottom = if (isCompactLandscape) 10.dp else 16.dp
-                                                )
-                                        ) {
-                                            Column(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(
-                                                        start = if (isCompactLandscape) 10.dp else 16.dp,
-                                                        end = if (isCompactLandscape) 10.dp else 16.dp,
-                                                        top = 6.dp,
-                                                        bottom = 4.dp
-                                                    )
-                                            ) {
-                                                PlayerSeekBar(
-                                                    positionProvider = { currentPositionMs },
-                                                    durationProvider = { durationMs },
-                                                    onSeek = { newPos ->
-                                                        exoPlayer.seekTo(newPos)
-                                                        currentPositionMs = newPos
-                                                    },
-                                                    segments = seekSegments,
-                                                    bufferedProvider = { exoPlayer.bufferedPosition.coerceAtLeast(0L) }
-                                                )
-
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .horizontalScroll(rememberScrollState()),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(if (isCompactLandscape) 2.dp else 4.dp)
-                                                    ) {
-                                                        PlayerIconButton(
-                                                            icon = Icons.Default.Tune,
-                                                            contentDescription = "Player Settings",
-                                                            onClick = { showSettingsSheet = true },
-                                                            size = dockButtonSize,
-                                                            iconSize = dockIconSize
-                                                        )
-                                                        PlayerIconButton(
-                                                            icon = Icons.Default.FolderOpen,
-                                                            contentDescription = "Streams",
-                                                            onClick = { showStreamsSheet = true },
-                                                            size = dockButtonSize,
-                                                            iconSize = dockIconSize
-                                                        )
-                                                        PlayerIconButton(
-                                                            icon = Icons.Default.Subtitles,
-                                                            contentDescription = "Subtitles",
-                                                            onClick = { showSubtitlesSheet = true },
-                                                            active = subtitlesEnabled,
-                                                            tint = if (subtitlesEnabled) null else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                                            size = dockButtonSize,
-                                                            iconSize = dockIconSize
-                                                        )
-                                                        PlayerIconButton(
-                                                            icon = Icons.Default.MusicNote,
-                                                            contentDescription = "Audio Track ($activeAudioShortLabel)",
-                                                            onClick = { showAudioSheet = true },
-                                                            active = showAudioSheet,
-                                                            size = dockButtonSize,
-                                                            iconSize = dockIconSize
-                                                        )
-                                                        if (useOpenSubtitle && subtitlesEnabled && openSubtitleTracks.isNotEmpty()) {
-                                                            Box(
-                                                                modifier = Modifier
-                                                                    .padding(start = 4.dp)
-                                                                    .clip(PillShape)
-                                                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
-                                                                    .clickable { syncSubtitleToLine() }
-                                                                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                                                            ) {
-                                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                                    Icon(
-                                                                        imageVector = Icons.Default.TouchApp,
-                                                                        contentDescription = null,
-                                                                        tint = MaterialTheme.colorScheme.primary,
-                                                                        modifier = Modifier.size(16.dp)
-                                                                    )
-                                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                                    Text(
-                                                                        text = stringResource(R.string.player_subtitle_sync_line),
-                                                                        color = MaterialTheme.colorScheme.primary,
-                                                                        style = MaterialTheme.typography.labelMedium,
-                                                                        fontWeight = FontWeight.SemiBold,
-                                                                        maxLines = 1
-                                                                    )
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-
-                                                    Spacer(modifier = Modifier.width(12.dp))
-
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(if (isCompactLandscape) 2.dp else 4.dp)
-                                                    ) {
-                                                        PlayerIconButton(
-                                                            icon = Icons.Default.Replay10,
-                                                            contentDescription = "Back 10 seconds",
-                                                            onClick = { performDoubleTapSeek(-10) },
-                                                            size = dockButtonSize,
-                                                            iconSize = dockIconSize
-                                                        )
-                                                        PlayerIconButton(
-                                                            icon = Icons.Default.Forward10,
-                                                            contentDescription = "Forward 10 seconds",
-                                                            onClick = { performDoubleTapSeek(10) },
-                                                            size = dockButtonSize,
-                                                            iconSize = dockIconSize
-                                                        )
-                                                    }
-
-                                                    Spacer(modifier = Modifier.width(12.dp))
-
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(if (isCompactLandscape) 2.dp else 4.dp)
-                                                    ) {
-                                                        PlayerIconButton(
-                                                            icon = Icons.Default.PictureInPicture,
-                                                            contentDescription = "Picture-in-Picture",
-                                                            onClick = { enterPipMode() },
-                                                            size = dockButtonSize,
-                                                            iconSize = dockIconSize
-                                                        )
-                                                        PlayerIconButton(
-                                                            icon = Icons.Default.AspectRatio,
-                                                            contentDescription = "Aspect Ratio",
-                                                            onClick = { cycleAspectRatio() },
-                                                            active = pictureMode != VideoPictureMode.FIT || videoZoom > 1.01f,
-                                                            size = dockButtonSize,
-                                                            iconSize = dockIconSize
-                                                        )
-                                                        PlayerIconButton(
-                                                            icon = Icons.Default.FullscreenExit,
-                                                            contentDescription = "Exit Fullscreen",
-                                                            onClick = { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT },
-                                                            size = dockButtonSize,
-                                                            iconSize = if (isCompactLandscape) 20.dp else 24.dp
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            SkipSegmentOverlay(
-                                segment = if (isControlsLocked) null else activeSkipSegment,
-                                compact = isCompactLandscape,
-                                bottomPadding = if (showControls) (if (isCompactLandscape) 124.dp else 148.dp) else 24.dp,
-                                endPadding = hudHorizontalPadding,
-                                onSkip = { seg ->
-                                    val maxDur = exoPlayer.duration.coerceAtLeast(0L)
-                                    val target = if (maxDur > 0L) seg.endMs.coerceAtMost(maxDur) else seg.endMs
-                                    exoPlayer.seekTo(target)
-                                    currentPositionMs = target
-                                    resumePositionRef.longValue = target
-                                    latestOnSaveProgress?.invoke(target, maxDur)
-                                    aspectRatioToastMessage = seg.label.replace("Skip ", "Skipped ")
-                                }
-                            )
+                            list
                         }
-                    }
-                }
-            }
 
-            // ══════════════════════════════════════════════════════════════
-            // FLOATING ASPECT RATIO / STATUS TOAST OVERLAY
-            // ══════════════════════════════════════════════════════════════
-            AnimatedVisibility(
-                visible = !effectiveInPip && aspectRatioToastMessage != null,
-                enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
-                exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 70.dp)
-            ) {
-                GlassSurface(
-                    shape = PillShape,
-                    overMedia = true
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.AspectRatio,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
+                        val landscapeSubtitleOptions = remember(
+                            resolutionState,
+                            useOpenSubtitle,
+                            activeSubtitlePlugin,
+                            openSubtitleTracks,
+                            embeddedTextTrackLabels,
+                            subtitlesEnabled,
+                            selectedSubtitleTrack
+                        ) {
+                            val sourceSubs = (resolutionState as? StreamResolutionState.Success)?.stream?.subtitles
+                                ?.filter { sub ->
+                                    sub.url.isNotBlank() &&
+                                        !sub.url.contains("thumbnails", ignoreCase = true) &&
+                                        !sub.lang.contains("thumbnail", ignoreCase = true) &&
+                                        !sub.lang.contains("unknown", ignoreCase = true)
+                                }
+                                ?: emptyList()
+
+                            val trackLabels = mutableListOf<String>()
+                            if (useOpenSubtitle && activeSubtitlePlugin != null) {
+                                openSubtitleTracks.forEach { sub ->
+                                    if (trackLabels.none { it.equals(sub.lang, ignoreCase = true) }) {
+                                        trackLabels.add(sub.lang)
+                                    }
+                                }
+                            }
+                            sourceSubs.forEach { sub ->
+                                if (trackLabels.none { it.equals(sub.lang, ignoreCase = true) }) {
+                                    trackLabels.add(sub.lang)
+                                }
+                            }
+                            embeddedTextTrackLabels.forEach { lbl ->
+                                if (trackLabels.none { it.equals(lbl, ignoreCase = true) }) {
+                                    trackLabels.add(lbl)
+                                }
+                            }
+                            if (trackLabels.isEmpty()) {
+                                trackLabels.add("English [CC]")
+                            }
+
+                            buildList {
+                                add(
+                                    LandscapePillOption(
+                                        id = "Off",
+                                        label = "Off",
+                                        isSelected = !subtitlesEnabled
+                                    )
+                                )
+                                trackLabels.take(5).forEach { rawLabel ->
+                                    val shortLabel = rawLabel
+                                        .substringBefore(" (")
+                                        .substringBefore(" [")
+                                        .substringBefore(" -")
+                                        .trim()
+                                        .ifBlank { rawLabel }
+                                    add(
+                                        LandscapePillOption(
+                                            id = rawLabel,
+                                            label = shortLabel,
+                                            isSelected = subtitlesEnabled && selectedSubtitleTrack.equals(rawLabel, ignoreCase = true)
+                                        )
+                                    )
+                                }
+                            }
+                        }
+
+                        val landscapeAudioOptions = remember(embeddedAudioTracks, selectedEmbeddedAudioKey, availableServers, selectedAudioType) {
+                            if (embeddedAudioTracks.size > 1) {
+                                embeddedAudioTracks.map { track ->
+                                    LandscapePillOption(
+                                        id = "emb:${track.key}",
+                                        label = track.shortLanguage,
+                                        isSelected = track.key == selectedEmbeddedAudioKey ||
+                                            (selectedEmbeddedAudioKey == null && track.isSelected)
+                                    )
+                                }
+                            } else {
+                                val serverTypes = availableServers
+                                    .map { it.type.trim().lowercase().ifBlank { "sub" } }
+                                    .distinct()
+                                    .sortedBy { audioLanguageSortOrder(it) }
+                                    .ifEmpty { listOf(selectedAudioType.lowercase()) }
+
+                                serverTypes.map { typeKey ->
+                                    LandscapePillOption(
+                                        id = "srv:$typeKey",
+                                        label = audioTypeShortLanguage(typeKey),
+                                        isSelected = selectedAudioType.equals(typeKey, ignoreCase = true)
+                                    )
+                                }
+                            }
+                        }
+
+                        val landscapeQualityChipLabel = remember(selectedServer, isVideoEnhanced) {
+                            when {
+                                selectedServer != null -> selectedServer!!.name
+                                isVideoEnhanced -> "4K"
+                                else -> "Quality"
+                            }
+                        }
+
+                        val landscapeUiState = KanimeLandscapeUiState(
+                            episodeHeading = formattedEpisodeHeading,
+                            animeTitle = anime.title,
+                            qualityBadgeText = qualityBadgeText,
+                            isVideoEnhanced = isVideoEnhanced,
+                            isPlaying = isPlaying,
+                            showControls = showControls,
+                            isControlsLocked = isControlsLocked,
+                            showPlaybackSettings = showPlaybackSettingsModal,
+                            currentPositionMs = currentPositionMs,
+                            durationMs = durationMs,
+                            bufferedPositionMs = exoPlayer.bufferedPosition.coerceAtLeast(0L),
+                            seekSegments = seekSegments,
+                            qualityLabel = landscapeQualityChipLabel,
+                            subtitleLabel = if (subtitlesEnabled && selectedSubtitleTrack != "Off") "Subtitles" else "Off",
+                            playbackSpeed = playbackSpeed,
+                            hasPreviousEpisode = onPreviousEpisode != null,
+                            hasNextEpisode = onNextEpisode != null,
+                            isSubtitlesEnabled = subtitlesEnabled,
+                            showSyncSubtitlePill = useOpenSubtitle && subtitlesEnabled && openSubtitleTracks.isNotEmpty(),
+                            syncSubtitleLabel = stringResource(R.string.player_subtitle_sync_line),
+                            isAspectRatioModified = pictureMode != VideoPictureMode.FIT || videoZoom > 1.01f,
+                            qualityOptions = landscapeQualityOptions,
+                            subtitleOptions = landscapeSubtitleOptions,
+                            audioOptions = landscapeAudioOptions,
+                            enhancementSubtitle = animeEnhancementStatus?.detailLabel()
+                                ?: "Improve video quality (if available)",
+                            gestureType = gestureType,
+                            gestureLevel = gestureLevel
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = aspectRatioToastMessage ?: "",
-                            color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.labelLarge
+
+                        KanimeLandscapePlayerScreen(
+                            state = landscapeUiState,
+                            videoSurface = {
+                                VideoSurface(modifier = Modifier.fillMaxSize())
+                            },
+                            videoOverlayExtras = {
+                                DoubleTapSeekOverlay(
+                                    side = doubleTapSeekSide,
+                                    seconds = doubleTapSeekSeconds,
+                                    compact = false
+                                )
+                                SkipSegmentOverlay(
+                                    segment = if (isControlsLocked || showPlaybackSettingsModal) null else activeSkipSegment,
+                                    compact = false,
+                                    bottomPadding = if (showControls) 120.dp else 24.dp,
+                                    endPadding = 28.dp,
+                                    onSkip = { seg ->
+                                        val maxDur = exoPlayer.duration.coerceAtLeast(0L)
+                                        val target = if (maxDur > 0L) seg.endMs.coerceAtMost(maxDur) else seg.endMs
+                                        exoPlayer.seekTo(target)
+                                        currentPositionMs = target
+                                        resumePositionRef.longValue = target
+                                        latestOnSaveProgress?.invoke(target, maxDur)
+                                        aspectRatioToastMessage = seg.label.replace("Skip ", "Skipped ")
+                                    }
+                                )
+                            },
+                            onBack = {
+                                showPlaybackSettingsModal = false
+                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                            },
+                            onToggleControls = {
+                                if (!isControlsLocked) {
+                                    showControls = !showControls
+                                } else {
+                                    showControls = true
+                                }
+                            },
+                            onDoubleTapLeft = { performDoubleTapSeek(-10) },
+                            onDoubleTapRight = { performDoubleTapSeek(+10) },
+                            onVerticalDragStart = { isLeftSide ->
+                                if (isLeftSide) {
+                                    gestureType = "brightness"
+                                    gestureLevel = brightness
+                                } else {
+                                    gestureType = "volume"
+                                    gestureLevel = volume.toFloat() / maxVolume.toFloat()
+                                }
+                            },
+                            onVerticalDragDelta = { dragAmount ->
+                                if (gestureType == "brightness") {
+                                    brightness = (brightness - (dragAmount / 350f)).coerceIn(0.01f, 1.0f)
+                                    gestureLevel = brightness
+                                    activity?.window?.attributes = activity.window.attributes.apply {
+                                        screenBrightness = brightness
+                                    }
+                                } else if (gestureType == "volume") {
+                                    val step = -(dragAmount / 25f).toInt()
+                                    val newVol = (volume + step).coerceIn(0, maxVolume)
+                                    if (newVol != volume) {
+                                        volume = newVol
+                                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, volume, 0)
+                                        gestureLevel = volume.toFloat() / maxVolume.toFloat()
+                                    }
+                                }
+                            },
+                            onPlayPauseToggle = {
+                                if (isPlaying) pausePlayback() else resumeOrPlay()
+                            },
+                            onRewind10 = { performDoubleTapSeek(-10) },
+                            onForward10 = { performDoubleTapSeek(+10) },
+                            onPreviousEpisode = { onPreviousEpisode?.invoke() },
+                            onNextEpisode = { onNextEpisode?.invoke() },
+                            onSeekTo = { newPos ->
+                                exoPlayer.seekTo(newPos)
+                                currentPositionMs = newPos
+                                resumePositionRef.longValue = newPos
+                            },
+                            onToggleLock = {
+                                showPlaybackSettingsModal = false
+                                isControlsLocked = !isControlsLocked
+                            },
+                            onTogglePlaybackSettings = {
+                                showPlaybackSettingsModal = !showPlaybackSettingsModal
+                                if (showPlaybackSettingsModal) {
+                                    showControls = true
+                                }
+                            },
+                            onDismissPlaybackSettings = {
+                                showPlaybackSettingsModal = false
+                            },
+                            onQualityBadgeClick = {
+                                showPlaybackSettingsModal = false
+                                showEnhanceSheet = true
+                            },
+                            onEnhanceIconClick = {
+                                showPlaybackSettingsModal = false
+                                showEnhanceSheet = true
+                            },
+                            onPictureSheetClick = {
+                                showPlaybackSettingsModal = false
+                                showPictureSheet = true
+                            },
+                            onCycleAspectRatioClick = {
+                                cycleAspectRatio()
+                            },
+                            onQualityChipClick = {
+                                showPlaybackSettingsModal = false
+                                showStreamsSheet = true
+                            },
+                            onSubtitlesChipClick = {
+                                showPlaybackSettingsModal = false
+                                showSubtitlesSheet = true
+                            },
+                            onSpeedChipClick = {
+                                showPlaybackSettingsModal = false
+                                showSpeedSheet = true
+                            },
+                            onAudioRowClick = {
+                                showPlaybackSettingsModal = false
+                                showAudioSheet = true
+                            },
+                            onSyncSubtitleClick = {
+                                syncSubtitleToLine()
+                            },
+                            onPipClick = {
+                                enterPipMode()
+                            },
+                            onExitFullscreenClick = {
+                                showPlaybackSettingsModal = false
+                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                            },
+                            onSelectQualityOption = { opt ->
+                                when {
+                                    opt.id == "auto" -> {
+                                        autoSelectStream = true
+                                        pendingAudioResumePosMs = currentPositionMs.coerceAtLeast(0L)
+                                        selectedServer = null
+                                        resolveStream()
+                                        aspectRatioToastMessage = "Video Quality: Auto"
+                                    }
+                                    opt.id.startsWith("srv:") -> {
+                                        val sourceId = opt.id.removePrefix("srv:")
+                                        val srv = availableServers.firstOrNull { it.sourceId == sourceId }
+                                        if (srv != null && selectedServer?.sourceId != srv.sourceId) {
+                                            autoSelectStream = false
+                                            pendingAudioResumePosMs = currentPositionMs.coerceAtLeast(0L)
+                                            selectedEmbeddedAudioKey = null
+                                            embeddedAudioTracks = emptyList()
+                                            selectedServer = srv
+                                            resolveStream(srv)
+                                            aspectRatioToastMessage = "Switching server to ${srv.name}"
+                                        }
+                                    }
+                                    else -> {
+                                        showPlaybackSettingsModal = false
+                                        showStreamsSheet = true
+                                    }
+                                }
+                            },
+                            onSelectSubtitleOption = { opt ->
+                                if (opt.id == "Off") {
+                                    subtitlesEnabled = false
+                                    aspectRatioToastMessage = "Subtitles: Off"
+                                } else {
+                                    subtitlesEnabled = true
+                                    selectedSubtitleTrack = opt.id
+                                    aspectRatioToastMessage = "Subtitles: ${opt.label}"
+                                }
+                            },
+                            onSelectSpeedOption = { spd ->
+                                playbackSpeed = spd
+                                aspectRatioToastMessage = "Playback Speed: ${spd}x"
+                            },
+                            onSelectAudioOption = { opt ->
+                                when {
+                                    opt.id.startsWith("emb:") -> {
+                                        val key = opt.id.removePrefix("emb:")
+                                        embeddedAudioTracks.firstOrNull { it.key == key }?.let { track ->
+                                            pendingAudioTrackSelection = track
+                                            aspectRatioToastMessage = "Audio: ${track.displayName}"
+                                        }
+                                    }
+                                    opt.id.startsWith("srv:") -> {
+                                        val typeKey = opt.id.removePrefix("srv:")
+                                        if (!selectedAudioType.equals(typeKey, ignoreCase = true)) {
+                                            pendingAudioResumePosMs = currentPositionMs.coerceAtLeast(0L)
+                                            selectedEmbeddedAudioKey = null
+                                            embeddedAudioTracks = emptyList()
+                                            selectedAudioType = typeKey
+                                            aspectRatioToastMessage = "Switching audio to ${opt.label}"
+                                        }
+                                    }
+                                }
+                            },
+                            onToggleEnhancementSwitch = { enabled ->
+                                CatalogConfig.setAnimeUpscaleEnabled(enabled)
+                                if (!enabled) {
+                                    CatalogConfig.setAnimeLineSharpening(false)
+                                }
+                                aspectRatioToastMessage = if (enabled) {
+                                    "Anime4K 2x (${animeUpscaleQuality.shortLabel}): ON"
+                                } else {
+                                    "Video Enhancement: OFF"
+                                }
+                            }
                         )
                     }
                 }
