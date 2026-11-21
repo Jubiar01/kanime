@@ -721,12 +721,12 @@ fun PlayerDialog(
                     resolutionState = StreamResolutionState.Success(foundStream)
                 } else {
                     resolutionState = StreamResolutionState.Error("Unable to connect to streaming servers on ${activePlugin.name}. Please verify plugin is installed and active.")
-    // Native back press handling: close floating Playback Settings first, then exit landscape, then close player
-    BackHandler {
-        when {
-            showPlaybackSettingsModal -> showPlaybackSettingsModal = false
-            isLandscape -> activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            else -> onDismiss()
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                resolutionState = StreamResolutionState.Error("${activePlugin.name} stream extraction error: ${e.message}")
+            }
         }
     }
 
@@ -779,12 +779,12 @@ fun PlayerDialog(
         }
     }
 
-    // Native back press handling: in landscape, rotate back to portrait first; in portrait, close player
+    // Native back press handling: close floating Playback Settings first, then exit landscape, then close player
     BackHandler {
-        if (isLandscape) {
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        } else {
-            onDismiss()
+        when {
+            showPlaybackSettingsModal -> showPlaybackSettingsModal = false
+            isLandscape -> activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else -> onDismiss()
         }
     }
 
@@ -2210,6 +2210,42 @@ fun PlayerDialog(
                                     "Video Enhancement: OFF"
                                 }
                             }
+                        )
+                    }
+                }
+            }
+
+            // ══════════════════════════════════════════════════════════════
+            // FLOATING TOAST OVERLAY (Quality / Aspect Ratio / Sync / Speed)
+            // ══════════════════════════════════════════════════════════════
+            AnimatedVisibility(
+                visible = !effectiveInPip && aspectRatioToastMessage != null,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 70.dp)
+                    .zIndex(25f)
+            ) {
+                GlassSurface(
+                    shape = PillShape,
+                    overMedia = true
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = aspectRatioToastMessage ?: "",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.labelLarge
                         )
                     }
                 }
