@@ -1697,7 +1697,7 @@ fun PlayerDialog(
                                     number = ep.episodeNumber,
                                     title = ep.title.ifBlank { "Episode ${ep.episodeNumber}" },
                                     durationLabel = ep.duration.ifBlank { fallbackDuration },
-                                    airDateLabel = ep.aired,
+                                    airDateLabel = ep.aired.orEmpty(),
                                     thumbnailUrl = ep.thumbnail.ifBlank { anime.coverUrl }
                                 )
                             }
@@ -1712,7 +1712,7 @@ fun PlayerDialog(
                                     durationLabel = episode.duration.ifBlank {
                                         if (durationMs > 0L) formatTime(durationMs) else anime.duration.ifBlank { "24:00" }
                                     },
-                                    airDateLabel = episode.aired,
+                                    airDateLabel = episode.aired.orEmpty(),
                                     thumbnailUrl = episode.thumbnail.ifBlank { anime.coverUrl }
                                 )
                         }

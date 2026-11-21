@@ -11,6 +11,7 @@ local.properties
 /captures
 .externalNativeBuild
 .cxx
+pub.txt
 
 # Private plugin modules (excluded from public repo)
 /kanikoto-plugin/

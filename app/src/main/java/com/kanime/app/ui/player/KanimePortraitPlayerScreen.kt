@@ -1,15 +1,17 @@
 package com.kanime.app.ui.player
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -33,13 +36,14 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
+import com.kanime.app.ui.theme.GeistFontFamily
+import kotlinx.coroutines.launch
 
-// Warm dark obsidian + peach-amber glass palette matching your mockup
 private object PlayerPalette {
     val BgTop = Color(0xFF1E1311)
     val BgBottom = Color(0xFF100B0A)
-    val GlassSurface = Color(0xFF281E1C).copy(alpha = 0.72f)
+    val GlassSurface = Color(0xFF281E1C).copy(alpha = 0.76f)
     val GlassBorder = Color.White.copy(alpha = 0.14f)
     val AccentPeach = Color(0xFFF3B58B)
     val AccentWarmStart = Color(0xFF6B442B).copy(alpha = 0.85f)
@@ -47,7 +51,7 @@ private object PlayerPalette {
     val RatingBg = Color(0xFF3A271B).copy(alpha = 0.88f)
     val TextPrimary = Color(0xFFF7F2EF)
     val TextMuted = Color(0xFFA79992)
-    val DockBg = Color(0xFF1E1514).copy(alpha = 0.95f)
+    val DockBg = Color(0xFF1E1514).copy(alpha = 0.96f)
 }
 
 data class PlayerEpisodeUiItem(
@@ -71,7 +75,8 @@ data class KanimePlayerUiState(
     val durationMs: Long,
     val currentQualityLabel: String = "Quality",
     val currentSubtitleLabel: String = "Subtitles",
-    val playbackSpeed: Float = 1.0f
+    val playbackSpeed: Float = 1.0f,
+    val hasNextEpisode: Boolean = true
 )
 
 @Composable
@@ -90,11 +95,18 @@ fun KanimePortraitPlayerScreen(
     onQualityClick: () -> Unit,
     onSubtitlesClick: () -> Unit,
     onSpeedClick: () -> Unit,
-    onEpisodeListClick: () -> Unit,
+    onEpisodeListClick: () -> Unit = {},
     onNextEpisodeClick: () -> Unit,
     onEpisodeSelect: (PlayerEpisodeUiItem) -> Unit,
+    onDoubleTapLeft: () -> Unit = onRewind10,
+    onDoubleTapRight: () -> Unit = onForward10,
+    onRatingBadgeClick: () -> Unit = {},
+    videoOverlayExtras: @Composable BoxScope.() -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -124,14 +136,31 @@ fun KanimePortraitPlayerScreen(
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
                     .background(Color.Black)
-                    .clickable(onClick = onToggleControls)
             ) {
                 videoSurface()
 
-                AnimatedVisibility(
+                // Tap to toggle controls, double-tap left/right to seek -10s/+10s
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = { onToggleControls() },
+                                onDoubleTap = { offset ->
+                                    when {
+                                        offset.x < size.width * 0.45f -> onDoubleTapLeft()
+                                        offset.x > size.width * 0.55f -> onDoubleTapRight()
+                                        else -> onPlayPauseToggle()
+                                    }
+                                }
+                            )
+                        }
+                )
+
+                androidx.compose.animation.AnimatedVisibility(
                     visible = state.showControls,
-                    enter = fadeIn(),
-                    exit = fadeOut(),
+                    enter = fadeIn(tween(200)),
+                    exit = fadeOut(tween(160)),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     VideoControlsOverlay(
@@ -144,10 +173,14 @@ fun KanimePortraitPlayerScreen(
                         onSeekTo = onSeekTo
                     )
                 }
+
+                // Slot for DoubleTapSeekOverlay & SkipSegmentOverlay (AniSkip)
+                videoOverlayExtras()
             }
 
             // 3. Scrollable Metadata, Controls & Episodes
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -155,7 +188,7 @@ fun KanimePortraitPlayerScreen(
                     start = 16.dp,
                     end = 16.dp,
                     top = 16.dp,
-                    bottom = 104.dp // Room for sticky Now Playing bar
+                    bottom = 112.dp
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -164,7 +197,8 @@ fun KanimePortraitPlayerScreen(
                         episodeNumber = state.currentEpisode.number,
                         episodeTitle = state.currentEpisode.title,
                         animeTitle = state.animeTitle,
-                        rating = state.rating
+                        rating = state.rating,
+                        onRatingBadgeClick = onRatingBadgeClick
                     )
                 }
 
@@ -181,7 +215,13 @@ fun KanimePortraitPlayerScreen(
 
                 item(key = "primary_actions") {
                     PrimaryActionButtonsRow(
-                        onEpisodeListClick = onEpisodeListClick,
+                        hasNextEpisode = state.hasNextEpisode,
+                        onEpisodeListClick = {
+                            onEpisodeListClick()
+                            coroutineScope.launch {
+                                listState.animateScrollToItem(3)
+                            }
+                        },
                         onNextEpisodeClick = onNextEpisodeClick
                     )
                 }
@@ -197,12 +237,14 @@ fun KanimePortraitPlayerScreen(
                         Text(
                             text = "Episodes",
                             color = PlayerPalette.TextPrimary,
+                            fontFamily = GeistFontFamily,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "${state.episodes.size} Episodes",
+                            text = "${state.episodes.size} ${if (state.episodes.size == 1) "Episode" else "Episodes"}",
                             color = PlayerPalette.AccentPeach,
+                            fontFamily = GeistFontFamily,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -215,7 +257,7 @@ fun KanimePortraitPlayerScreen(
                 ) { episode ->
                     EpisodeRowCard(
                         episode = episode,
-                        isPlaying = episode.id == state.currentEpisode.id,
+                        isPlaying = episode.number == state.currentEpisode.number,
                         onClick = { onEpisodeSelect(episode) }
                     )
                 }
@@ -227,6 +269,7 @@ fun KanimePortraitPlayerScreen(
             posterUrl = state.animePosterUrl,
             episodeNumber = state.currentEpisode.number,
             episodeTitle = state.currentEpisode.title,
+            hasNextEpisode = state.hasNextEpisode,
             onNextEpisodeClick = onNextEpisodeClick,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -269,6 +312,7 @@ private fun PlayerTopGlassBar(
                     append("Anime")
                 }
             },
+            fontFamily = GeistFontFamily,
             fontSize = 17.sp,
             modifier = Modifier.weight(1f)
         )
@@ -329,7 +373,11 @@ private fun VideoControlsOverlay(
     onSeekTo: (Long) -> Unit
 ) {
     val safeDuration = durationMs.coerceAtLeast(1L)
-    val progress = (currentPositionMs.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
+    var isScrubbing by remember { mutableStateOf(false) }
+    var scrubFraction by remember { mutableFloatStateOf(0f) }
+    val liveProgress = (currentPositionMs.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
+    val displayedProgress = if (isScrubbing) scrubFraction else liveProgress
+    val displayedPositionMs = if (isScrubbing) (scrubFraction * safeDuration).toLong() else currentPositionMs
 
     Box(
         modifier = Modifier
@@ -337,8 +385,8 @@ private fun VideoControlsOverlay(
             .background(
                 Brush.verticalGradient(
                     0.0f to Color.Black.copy(alpha = 0.35f),
-                    0.45f to Color.Black.copy(alpha = 0.15f),
-                    1.0f to Color.Black.copy(alpha = 0.65f)
+                    0.45f to Color.Black.copy(alpha = 0.16f),
+                    1.0f to Color.Black.copy(alpha = 0.68f)
                 )
             )
     ) {
@@ -389,20 +437,28 @@ private fun VideoControlsOverlay(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 8.dp),
+                .padding(horizontal = 14.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = formatPlaybackTime(currentPositionMs),
+                text = formatPlaybackTime(displayedPositionMs),
                 color = Color.White,
+                fontFamily = GeistFontFamily,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
             )
 
             Slider(
-                value = progress,
-                onValueChange = { fraction -> onSeekTo((fraction * safeDuration).toLong()) },
+                value = displayedProgress,
+                onValueChange = { fraction ->
+                    isScrubbing = true
+                    scrubFraction = fraction
+                },
+                onValueChangeFinished = {
+                    isScrubbing = false
+                    onSeekTo((scrubFraction * safeDuration).toLong())
+                },
                 modifier = Modifier.weight(1f),
                 colors = SliderDefaults.colors(
                     thumbColor = PlayerPalette.AccentPeach,
@@ -414,6 +470,7 @@ private fun VideoControlsOverlay(
             Text(
                 text = formatPlaybackTime(durationMs),
                 color = Color.White,
+                fontFamily = GeistFontFamily,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -426,7 +483,8 @@ private fun EpisodeHeaderSection(
     episodeNumber: Int,
     episodeTitle: String,
     animeTitle: String,
-    rating: String
+    rating: String,
+    onRatingBadgeClick: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -435,8 +493,9 @@ private fun EpisodeHeaderSection(
     ) {
         Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
             Text(
-                text = "Ep $episodeNumber • $episodeTitle",
+                text = formatPortraitEpisodeHeading(episodeNumber, episodeTitle),
                 color = PlayerPalette.TextPrimary,
+                fontFamily = GeistFontFamily,
                 fontSize = 21.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -446,34 +505,40 @@ private fun EpisodeHeaderSection(
             Text(
                 text = animeTitle,
                 color = PlayerPalette.TextMuted,
+                fontFamily = GeistFontFamily,
                 fontSize = 14.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
 
-        Surface(
-            shape = CircleShape,
-            color = PlayerPalette.RatingBg,
-            border = BorderStroke(1.dp, PlayerPalette.AccentPeach.copy(alpha = 0.35f))
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+        if (rating.isNotBlank()) {
+            Surface(
+                onClick = onRatingBadgeClick,
+                shape = CircleShape,
+                color = PlayerPalette.RatingBg,
+                border = BorderStroke(1.dp, PlayerPalette.AccentPeach.copy(alpha = 0.35f))
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.AutoAwesome,
-                    contentDescription = "Rating",
-                    tint = PlayerPalette.AccentPeach,
-                    modifier = Modifier.size(14.dp)
-                )
-                Text(
-                    text = rating,
-                    color = PlayerPalette.AccentPeach,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        tint = PlayerPalette.AccentPeach,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = rating,
+                        color = PlayerPalette.AccentPeach,
+                        fontFamily = GeistFontFamily,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                }
             }
         }
     }
@@ -541,6 +606,7 @@ private fun ControlDropdownChip(
         Text(
             text = label,
             color = PlayerPalette.TextPrimary,
+            fontFamily = GeistFontFamily,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
@@ -558,6 +624,7 @@ private fun ControlDropdownChip(
 
 @Composable
 private fun PrimaryActionButtonsRow(
+    hasNextEpisode: Boolean,
     onEpisodeListClick: () -> Unit,
     onNextEpisodeClick: () -> Unit
 ) {
@@ -593,6 +660,7 @@ private fun PrimaryActionButtonsRow(
                 Text(
                     text = "Episode List",
                     color = PlayerPalette.TextPrimary,
+                    fontFamily = GeistFontFamily,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -600,6 +668,7 @@ private fun PrimaryActionButtonsRow(
         }
 
         // Frosted Dark Pill ("Next Episode")
+        val nextAlpha = if (hasNextEpisode) 1f else 0.45f
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -607,7 +676,7 @@ private fun PrimaryActionButtonsRow(
                 .clip(CircleShape)
                 .background(PlayerPalette.GlassSurface)
                 .border(1.dp, PlayerPalette.GlassBorder, CircleShape)
-                .clickable(onClick = onNextEpisodeClick),
+                .clickable(enabled = hasNextEpisode, onClick = onNextEpisodeClick),
             contentAlignment = Alignment.Center
         ) {
             Row(
@@ -617,12 +686,13 @@ private fun PrimaryActionButtonsRow(
                 Icon(
                     imageVector = Icons.Rounded.FastForward,
                     contentDescription = null,
-                    tint = PlayerPalette.TextPrimary,
+                    tint = PlayerPalette.TextPrimary.copy(alpha = nextAlpha),
                     modifier = Modifier.size(19.dp)
                 )
                 Text(
                     text = "Next Episode",
-                    color = PlayerPalette.TextPrimary,
+                    color = PlayerPalette.TextPrimary.copy(alpha = nextAlpha),
+                    fontFamily = GeistFontFamily,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -651,6 +721,12 @@ private fun EpisodeRowCard(
         PlayerPalette.AccentPeach.copy(alpha = 0.85f)
     } else {
         PlayerPalette.GlassBorder
+    }
+
+    val metaLine = remember(episode.durationLabel, episode.airDateLabel) {
+        listOf(episode.durationLabel.trim(), episode.airDateLabel.trim())
+            .filter { it.isNotBlank() }
+            .joinToString(" • ")
     }
 
     Row(
@@ -684,36 +760,41 @@ private fun EpisodeRowCard(
             Text(
                 text = "Ep ${episode.number}",
                 color = PlayerPalette.AccentPeach,
+                fontFamily = GeistFontFamily,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = episode.title,
+                text = episode.title.ifBlank { "Episode ${episode.number}" },
                 color = PlayerPalette.TextPrimary,
+                fontFamily = GeistFontFamily,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Schedule,
-                    contentDescription = null,
-                    tint = PlayerPalette.TextMuted,
-                    modifier = Modifier.size(12.dp)
-                )
-                Text(
-                    text = "${episode.durationLabel} • ${episode.airDateLabel}",
-                    color = PlayerPalette.TextMuted,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            if (metaLine.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Schedule,
+                        contentDescription = null,
+                        tint = PlayerPalette.TextMuted,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Text(
+                        text = metaLine,
+                        color = PlayerPalette.TextMuted,
+                        fontFamily = GeistFontFamily,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
 
@@ -742,6 +823,7 @@ private fun NowPlayingDock(
     posterUrl: String,
     episodeNumber: Int,
     episodeTitle: String,
+    hasNextEpisode: Boolean,
     onNextEpisodeClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -774,12 +856,14 @@ private fun NowPlayingDock(
                 Text(
                     text = "Now Playing",
                     color = PlayerPalette.AccentPeach,
+                    fontFamily = GeistFontFamily,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
-                    text = "Ep $episodeNumber • $episodeTitle",
+                    text = formatPortraitEpisodeHeading(episodeNumber, episodeTitle),
                     color = PlayerPalette.TextPrimary,
+                    fontFamily = GeistFontFamily,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -795,13 +879,14 @@ private fun NowPlayingDock(
                     .background(Color.White.copy(alpha = 0.14f))
             )
 
+            val nextAlpha = if (hasNextEpisode) 1f else 0.45f
             Row(
                 modifier = Modifier
                     .height(40.dp)
                     .clip(CircleShape)
                     .background(Color.White.copy(alpha = 0.08f))
                     .border(1.dp, PlayerPalette.GlassBorder, CircleShape)
-                    .clickable(onClick = onNextEpisodeClick)
+                    .clickable(enabled = hasNextEpisode, onClick = onNextEpisodeClick)
                     .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -809,18 +894,28 @@ private fun NowPlayingDock(
                 Icon(
                     imageVector = Icons.Rounded.FastForward,
                     contentDescription = null,
-                    tint = PlayerPalette.TextPrimary,
+                    tint = PlayerPalette.TextPrimary.copy(alpha = nextAlpha),
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
                     text = "Next Episode",
-                    color = PlayerPalette.TextPrimary,
+                    color = PlayerPalette.TextPrimary.copy(alpha = nextAlpha),
+                    fontFamily = GeistFontFamily,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
         }
     }
+}
+
+private fun formatPortraitEpisodeHeading(episodeNumber: Int, rawTitle: String): String {
+    val trimmed = rawTitle.trim()
+    val isRedundant = trimmed.isBlank() ||
+        trimmed.equals("Episode $episodeNumber", ignoreCase = true) ||
+        trimmed.equals("Episode 0$episodeNumber", ignoreCase = true) ||
+        trimmed.equals("Ep $episodeNumber", ignoreCase = true)
+    return if (isRedundant) "Episode $episodeNumber" else "Ep $episodeNumber • $trimmed"
 }
 
 private fun formatPlaybackTime(ms: Long): String {
